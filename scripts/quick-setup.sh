@@ -124,11 +124,23 @@ docker logs bpmz-api 2>&1 | tail -20
 
 echo ""
 echo "=== Проверка API ==="
-echo -n "локально:  "
-curl -s --max-time 10 http://localhost:3000/health || echo "нет ответа"
-echo ""
-echo -n "снаружи:   "
-curl -s --max-time 20 "https://${DOMAIN}/api/health" || echo "нет ответа (проверь DNS и подожди выпуск сертификата)"
-echo ""
+# Порт 3000 намеренно НЕ опубликован наружу (в docker-compose стоит expose,
+# а не ports), поэтому проверяем изнутри контейнера — снаружи он недоступен.
+echo -n "внутри контейнера: "
+docker exec bpmz-api node -e "fetch('http://127.0.0.1:3000/health').then(r=>r.text()).then(t=>console.log(t)).catch(e=>console.log('НЕТ ОТВЕТА:',e.message))" 2>/dev/null \
+  || echo "контейнер bpmz-api не запущен — смотри 'docker compose logs api'"
+
+echo -n "снаружи (https): "
+EXT=$(curl -s --max-time 20 "https://${DOMAIN}/api/health" 2>/dev/null || echo "")
+if echo "$EXT" | grep -q '"status"'; then
+  echo "$EXT"
+else
+  echo "нет корректного ответа"
+  echo ""
+  echo "  Если внутри контейнера ответ есть, а снаружи нет — проблема НЕ в сервере."
+  echo "  Почти всегда причина одна: A-запись домена ${DOMAIN} не указывает на этот VPS."
+  echo "  Сейчас ${DOMAIN} → ${DOMAIN_IP}, а этот сервер → ${SERVER_IP}"
+  echo "  Исправь DNS в панели регистратора и запусти скрипт снова."
+fi
 echo ""
 echo "Готово. Приложение подключается к https://${DOMAIN}/api"

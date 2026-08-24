@@ -45,6 +45,10 @@ echo ""
 sh scripts/vps-status.sh
 
 echo ""
-echo -n "Проверка API: "
-curl -s --max-time 20 https://bipmusic.ru/api/health || echo "нет ответа"
+echo -n "API внутри контейнера: "
+docker exec bpmz-api node -e "fetch('http://127.0.0.1:3000/health').then(r=>r.text()).then(t=>console.log(t)).catch(e=>console.log('НЕТ ОТВЕТА:',e.message))" 2>/dev/null \
+  || echo "контейнер не запущен"
+
+echo -n "API снаружи:           "
+curl -s --max-time 20 https://bipmusic.ru/api/health || echo "нет ответа (проверь DNS: домен должен указывать на этот VPS)"
 echo ""
