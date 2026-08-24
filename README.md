@@ -56,22 +56,77 @@ dig +short bipmusic.ru
 
 ---
 
-## Быстрый способ: одна команда
+# Деплой через GitHub (основной способ)
 
-Если файлы уже на сервере в `/root/server`:
+Репозиторий приватный, поэтому серверу нужен доступ на чтение. Используем
+**deploy key** — SSH-ключ только для этого репозитория, без права записи.
+Пароли и токены на сервере не хранятся.
+
+## Первичная настройка (один раз)
+
+Подключись к VPS по SSH и выполни:
+
+```bash
+# 1. git и SSH-ключ для GitHub
+apt-get update -qq && apt-get install -y git
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+ssh-keygen -t ed25519 -C "bipmusic-vps" -f ~/.ssh/id_ed25519_bipmusic -N ""
+
+cat >> ~/.ssh/config <<'EOF'
+
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519_bipmusic
+    IdentitiesOnly yes
+EOF
+chmod 600 ~/.ssh/config
+
+# 2. показать публичный ключ
+cat ~/.ssh/id_ed25519_bipmusic.pub
+```
+
+Скопируй выведенный ключ и добавь его на GitHub:
+**[Settings → Deploy keys](https://github.com/filippin4ik-dev/bipmusic-server/settings/keys)**
+→ *Add deploy key* → вставь ключ → *Add key*.
+Галочку **«Allow write access» не ставь** — серверу нужно только чтение.
+
+Затем забери код (папка `/root/server` может быть непустой — `data/` и `.env`
+не пострадают, они в `.gitignore`):
+
+```bash
+mkdir -p /root/server && cd /root/server
+git init -q -b main
+git remote add origin git@github.com:filippin4ik-dev/bipmusic-server.git
+git fetch origin
+git reset --hard origin/main
+chmod +x scripts/*.sh docker-entrypoint.sh
+```
+
+## Запуск
 
 ```bash
 cd /root/server && sh scripts/quick-setup.sh
 ```
 
-Скрипт сам поставит Docker, создаст `.env`, сгенерирует все секреты и пароль
+Скрипт поставит Docker, создаст `.env`, сгенерирует секреты и пароль
 администратора, проверит DNS, соберёт и запустит контейнеры, а в конце покажет
-данные для входа. Повторный запуск безопасен — существующие секреты и данные
-не перезаписываются.
+данные для входа. Повторный запуск безопасен — существующие секреты, база и
+треки не перезаписываются.
 
-Ниже — то же самое по шагам, если хочешь контролировать каждый этап.
+## Обновление (каждый раз после `git push` с Mac)
+
+```bash
+cd /root/server && sh scripts/vps-git-update.sh
+```
+
+Скрипт забирает свежий код из GitHub, пересобирает контейнеры и проверяет API.
+`.env` и `data/` не трогаются. Локальные правки отслеживаемых файлов на сервере
+при этом отбрасываются — редактируй код на Mac и пушь в GitHub.
 
 ---
+
+# Альтернатива: залить файлы вручную
 
 ## Шаг 1. Залить файлы
 
