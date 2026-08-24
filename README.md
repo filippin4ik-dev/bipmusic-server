@@ -42,11 +42,19 @@ cd /root/server && docker compose restart caddy && docker compose logs -f caddy
 Забыл логин или пароль от админки:
 
 ```bash
+grep -E '^ADMIN_(NICKNAME|EMAIL|PASSWORD)=' /root/server/.env
+```
+
+Работает всегда, даже если код на сервере ещё не обновлён. В приложении
+вводится **ник**, а не email.
+
+То же самое, но с проверкой, что `ADMIN_EMAIL` согласован с приложениями:
+
+```bash
 cd /root/server && sh scripts/admin-credentials.sh
 ```
 
-Скрипт покажет ник и пароль из `.env` и проверит, что `ADMIN_EMAIL`
-согласован с приложениями. Если нет — `sh scripts/admin-credentials.sh --fix`.
+Если скрипт ругается на email — `sh scripts/admin-credentials.sh --fix`.
 
 Обе команды выполняются **на VPS** по SSH (например, через Termius).
 `.env` и папка `data/` (база, треки, бэкапы) при обновлении не затрагиваются.
@@ -403,6 +411,14 @@ curl -s https://bipmusic.ru/health
 
 ## Вход в админку
 
+Посмотреть учётные данные напрямую в `.env`:
+
+```bash
+grep -E '^ADMIN_(NICKNAME|EMAIL|PASSWORD)=' /root/server/.env
+```
+
+Или то же самое плюс проверка на частую ошибку с email:
+
 ```bash
 sh scripts/admin-credentials.sh
 ```
@@ -461,6 +477,8 @@ sh scripts/vps-update.sh
 cd /root/server && docker compose ps           # статус
 cd /root/server && docker compose logs -f api  # логи API
 cd /root/server && docker compose restart      # перезапуск
+
+grep -E '^ADMIN_(NICKNAME|EMAIL|PASSWORD)=' /root/server/.env   # логин админа
 ```
 
 ## Скрипты
