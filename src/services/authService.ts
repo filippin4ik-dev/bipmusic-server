@@ -52,11 +52,20 @@ export async function registerUser(email: string, password: string, nickname: st
 }
 
 export async function loginUser(email: string, password: string, ip?: string): Promise<AuthTokens> {
+  // The reply stays identical for both failures so nobody can probe which
+  // accounts exist. The distinction goes to the server log instead, where an
+  // operator needs it to tell a typo apart from a missing account.
   const user = await prisma.user.findUnique({ where: { email }, include: { profile: true } });
-  if (!user) throw new ValidationError('Неверный ник или пароль');
+  if (!user) {
+    console.warn(`[login] отказ: пользователя ${email} нет в базе`);
+    throw new ValidationError('Неверный ник или пароль');
+  }
 
   const isValid = await bcrypt.compare(password, user.password);
-  if (!isValid) throw new ValidationError('Неверный ник или пароль');
+  if (!isValid) {
+    console.warn(`[login] отказ: неверный пароль для ${email}`);
+    throw new ValidationError('Неверный ник или пароль');
+  }
 
   if (user.profile?.status === 'REJECTED') {
     throw new ValidationError('Аккаунт отклонён');
