@@ -58,50 +58,28 @@ dig +short bipmusic.ru
 
 # Деплой через GitHub (основной способ)
 
-Репозиторий приватный, поэтому серверу нужен доступ на чтение. Используем
-**deploy key** — SSH-ключ только для этого репозитория, без права записи.
-Пароли и токены на сервере не хранятся.
+Репозиторий публичный, поэтому серверу не нужны ни ключи, ни токены.
+Секреты хранятся только в `.env` на самом сервере — этот файл в `.gitignore`
+и в репозиторий никогда не попадает.
 
 ## Первичная настройка (один раз)
 
 Подключись к VPS по SSH и выполни:
 
 ```bash
-# 1. git и SSH-ключ для GitHub
 apt-get update -qq && apt-get install -y git
-mkdir -p ~/.ssh && chmod 700 ~/.ssh
-ssh-keygen -t ed25519 -C "bipmusic-vps" -f ~/.ssh/id_ed25519_bipmusic -N ""
 
-cat >> ~/.ssh/config <<'EOF'
-
-Host github.com
-    HostName github.com
-    User git
-    IdentityFile ~/.ssh/id_ed25519_bipmusic
-    IdentitiesOnly yes
-EOF
-chmod 600 ~/.ssh/config
-
-# 2. показать публичный ключ
-cat ~/.ssh/id_ed25519_bipmusic.pub
-```
-
-Скопируй выведенный ключ и добавь его на GitHub:
-**[Settings → Deploy keys](https://github.com/filippin4ik-dev/bipmusic-server/settings/keys)**
-→ *Add deploy key* → вставь ключ → *Add key*.
-Галочку **«Allow write access» не ставь** — серверу нужно только чтение.
-
-Затем забери код (папка `/root/server` может быть непустой — `data/` и `.env`
-не пострадают, они в `.gitignore`):
-
-```bash
 mkdir -p /root/server && cd /root/server
 git init -q -b main
-git remote add origin git@github.com:filippin4ik-dev/bipmusic-server.git
+git remote add origin https://github.com/filippin4ik-dev/bipmusic-server.git
 git fetch origin
 git reset --hard origin/main
 chmod +x scripts/*.sh docker-entrypoint.sh
 ```
+
+Используется `git init` + `reset`, а не `git clone`, потому что папка
+`/root/server` может быть непустой (база и треки в `data/`, файл `.env`) —
+эти файлы сохранятся, они в `.gitignore`.
 
 ## Запуск
 
@@ -123,6 +101,33 @@ cd /root/server && sh scripts/vps-git-update.sh
 Скрипт забирает свежий код из GitHub, пересобирает контейнеры и проверяет API.
 `.env` и `data/` не трогаются. Локальные правки отслеживаемых файлов на сервере
 при этом отбрасываются — редактируй код на Mac и пушь в GitHub.
+
+## Если сделать репозиторий приватным
+
+Тогда серверу понадобится ключ на чтение (deploy key). На VPS:
+
+```bash
+ssh-keygen -t ed25519 -C "bipmusic-vps" -f ~/.ssh/id_ed25519_bipmusic -N ""
+cat >> ~/.ssh/config <<'EOF'
+
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519_bipmusic
+    IdentitiesOnly yes
+EOF
+chmod 600 ~/.ssh/config
+cat ~/.ssh/id_ed25519_bipmusic.pub
+```
+
+Выведенный ключ добавь в **Settings → Deploy keys** репозитория (без права
+записи), затем переключи remote на SSH:
+
+```bash
+cd /root/server
+git remote set-url origin git@github.com:filippin4ik-dev/bipmusic-server.git
+git fetch origin && git reset --hard origin/main
+```
 
 ---
 
