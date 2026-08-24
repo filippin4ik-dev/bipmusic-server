@@ -43,7 +43,7 @@ echo ""
 
 # --- 5. Кто реально отвечает по домену -------------------------------------
 echo "5) Ответ по https://$DOMAIN :"
-SRV=$(curl -sS -o /dev/null -D - --max-time 15 "https://$DOMAIN/api/health" 2>&1 | grep -i '^server:' || echo "server: ?")
+SRV=$(curl -sS -o /dev/null -D - --max-time 15 "https://$DOMAIN/health" 2>&1 | grep -i '^server:' || echo "server: ?")
 echo "   $SRV"
 echo "   (если здесь не 'Caddy' — трафик уходит на чужой сервер, см. пункт 3)"
 echo ""

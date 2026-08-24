@@ -17,4 +17,4 @@ sleep 3
 sh scripts/vps-status.sh
 
 echo ""
-echo "Готово. Проверь: curl -s https://bipmusic.ru/api/health"
+echo "Готово. Проверь: curl -s https://bipmusic.ru/health"

@@ -146,7 +146,7 @@ docker exec bpmz-api node -e "fetch('http://127.0.0.1:3000/health').then(r=>r.te
   || echo "контейнер bpmz-api не запущен — смотри 'docker compose logs api'"
 
 echo -n "снаружи (https): "
-EXT=$(curl -s --max-time 20 "https://${DOMAIN}/api/health" 2>/dev/null || echo "")
+EXT=$(curl -s --max-time 20 "https://${DOMAIN}/health" 2>/dev/null || echo "")
 if echo "$EXT" | grep -q '"status"'; then
   echo "$EXT"
 else

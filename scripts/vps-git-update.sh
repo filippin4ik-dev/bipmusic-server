@@ -50,5 +50,5 @@ docker exec bpmz-api node -e "fetch('http://127.0.0.1:3000/health').then(r=>r.te
   || echo "контейнер не запущен"
 
 echo -n "API снаружи:           "
-curl -s --max-time 20 https://bipmusic.ru/api/health || echo "нет ответа (проверь DNS: домен должен указывать на этот VPS)"
+curl -s --max-time 20 https://bipmusic.ru/health || echo "нет ответа (проверь DNS: домен должен указывать на этот VPS)"
 echo ""

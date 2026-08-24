@@ -88,9 +88,14 @@ app.use(
 app.use(requestLogger);
 
 // Health check — must not consume the global per-IP budget (monitoring, orchestrators).
-app.get('/health', (_req, res) => {
+// Exposed on both paths: clients use `<host>/api` as their base URL, so
+// `/api/health` is the natural probe for them, while `/health` stays for
+// orchestrators and existing monitoring.
+const healthHandler = (_req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
+};
+app.get('/health', healthHandler);
+app.get('/api/health', healthHandler);
 
 // Global rate limiter (all routes below).
 app.use(globalLimiter);

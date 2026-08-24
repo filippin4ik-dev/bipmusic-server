@@ -92,7 +92,7 @@ sh scripts/vps-update.sh
 ```bash
 cd /root/server
 sh scripts/vps-status.sh
-curl -s https://bipmusic.ru/api/health
+curl -s https://bipmusic.ru/health
 ```
 
 В логах должно быть:

@@ -34,4 +34,4 @@ sleep 3
 sh scripts/vps-status.sh
 
 echo ""
-echo "API: https://bipmusic.ru/api/health"
+echo "API: https://bipmusic.ru/health"

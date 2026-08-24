@@ -379,7 +379,7 @@ sh scripts/vps-first-run.sh
 
 ```bash
 sh scripts/vps-status.sh
-curl -s https://bipmusic.ru/api/health
+curl -s https://bipmusic.ru/health
 ```
 
 В логах должно быть:
