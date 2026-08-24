@@ -23,6 +23,13 @@ cd /root/server && sh scripts/vps-git-update.sh
 cd /root/server && sh scripts/vps-diagnose.sh
 ```
 
+Если сборка падает с `failed to load metadata for docker.io/...`
+(Docker Hub блокирует российские IP):
+
+```bash
+cd /root/server && sh scripts/fix-docker-mirror.sh
+```
+
 Обе команды выполняются **на VPS** по SSH (например, через Termius).
 `.env` и папка `data/` (база, треки, бэкапы) при обновлении не затрагиваются.
 
@@ -171,6 +178,40 @@ chmod +x scripts/*.sh docker-entrypoint.sh
 docker compose up -d --build
 docker compose logs -f api      # выйти: Ctrl+C
 ```
+
+## Ошибка сборки: `failed to load metadata for docker.io/...`
+
+Полный текст обычно такой:
+
+```
+ERROR: failed to solve: node:20-alpine: failed to resolve source metadata
+for docker.io/library/node:20-alpine: ... 403 Forbidden
+```
+
+Причина не в проекте: **Docker Hub блокирует доступ с российских IP-адресов**,
+поэтому Docker не может скачать базовый образ Node.js. Решается зеркалами
+реестра:
+
+```bash
+cd /root/server && sh scripts/fix-docker-mirror.sh
+```
+
+Скрипт пропишет зеркала в `/etc/docker/daemon.json` (существующие настройки
+сохранятся, старый файл забэкапится в `daemon.json.bak`), перезапустит Docker
+и проверит, что образ скачивается. После успеха запусти сборку снова:
+
+```bash
+sh scripts/quick-setup.sh
+```
+
+`quick-setup.sh` теперь и сам проверяет доступ к Docker Hub перед сборкой и при
+необходимости настраивает зеркала автоматически.
+
+Используются зеркала `mirror.gcr.io` (Google), `dh-mirror.gitverse.ru` и
+`dockerhub1.beget.com`. Учти: публичные зеркала — сторонние сервисы, они отдают
+образы «как есть» и могут быть нестабильны. Если проект станет коммерческим,
+надёжнее поднять собственный pull-through cache на образе `registry:2` или
+использовать управляемый реестр (Yandex Container Registry, Selectel).
 
 ## Если после обновления что-то не работает
 

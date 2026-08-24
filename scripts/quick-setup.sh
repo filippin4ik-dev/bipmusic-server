@@ -24,6 +24,21 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 echo "✓ Docker: $(docker --version)"
 
+# Docker Hub блокирует российские IP → базовый образ не скачается и сборка упадёт
+# с "failed to load metadata for docker.io/...". Проверяем заранее.
+echo "→ Проверяю доступ к Docker Hub…"
+if docker pull node:20-alpine >/dev/null 2>&1; then
+  echo "✓ Docker Hub доступен"
+else
+  echo "⚠️  Docker Hub недоступен (частая причина — блокировка по стране)."
+  echo "   Настраиваю зеркала…"
+  sh scripts/fix-docker-mirror.sh || {
+    echo "" >&2
+    echo "Не удалось настроить зеркала. Реши это и запусти скрипт снова." >&2
+    exit 1
+  }
+fi
+
 # --- 2. Папки данных -------------------------------------------------------
 mkdir -p data/tracks data/covers data/tmp data/backups
 echo "✓ Папки данных готовы"
