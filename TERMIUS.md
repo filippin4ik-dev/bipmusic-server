@@ -2,7 +2,7 @@
 
 Домен: **https://bipmusic.ru**  
 API: **https://bipmusic.ru/api**  
-VPS: **root@194.87.104.91**  
+VPS: **root@IP_ТВОЕГО_VPS**  
 Папка на сервере: **/root/server**
 
 ---
@@ -27,7 +27,7 @@ chmod +x scripts/make-deploy-bundle.sh
 ### Вариант A — SFTP (файлы)
 
 1. Открой **Termius** на телефоне/Mac.
-2. Хост: **194.87.104.91**, пользователь **root**.
+2. Хост: **IP_ТВОЕГО_VPS**, пользователь **root**.
 3. Нажми на хост → **SFTP** / **Files** (иконка папки).
 4. Перейди в **`/root/server`**  
    (если папки нет — создай: `mkdir -p /root/server`).
@@ -36,7 +36,7 @@ chmod +x scripts/make-deploy-bundle.sh
 ### Вариант B — через SSH + терминал на Mac
 
 ```bash
-scp /Users/roman/Documents/your-private-groov/server/bpmz-server.zip root@194.87.104.91:/root/server/
+scp /Users/roman/Documents/your-private-groov/server/bpmz-server.zip root@IP_ТВОЕГО_VPS:/root/server/
 ```
 
 ---

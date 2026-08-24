@@ -1,7 +1,11 @@
 #!/bin/sh
 # Safe deploy from Mac — NEVER overwrites VPS data/
 set -e
-HOST="${1:-root@194.87.104.91}"
+if [ $# -lt 1 ]; then
+  echo "Укажи адрес сервера: sh scripts/deploy-to-vps.sh root@IP_ТВОЕГО_VPS" >&2
+  exit 1
+fi
+HOST="$1"
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "Deploy → $HOST:/root/server (data/ NOT synced)"

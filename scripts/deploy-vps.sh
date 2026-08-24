@@ -3,11 +3,14 @@
 # Всё собирается в Docker на твоём Mac, на VPS только загрузка готового образа.
 #
 # Использование:
-#   ./scripts/deploy-vps.sh
-#   ./scripts/deploy-vps.sh root@194.87.104.91
+#   ./scripts/deploy-vps.sh root@IP_ТВОЕГО_VPS
 set -euo pipefail
 
-VPS="${1:-root@194.87.104.91}"
+if [ $# -lt 1 ]; then
+  echo "Укажи адрес сервера: ./scripts/deploy-vps.sh root@IP_ТВОЕГО_VPS" >&2
+  exit 1
+fi
+VPS="$1"
 REMOTE="/root/server"
 IMAGE="bpmz-api:latest"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
