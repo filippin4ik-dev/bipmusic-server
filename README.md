@@ -30,6 +30,15 @@ cd /root/server && sh scripts/vps-diagnose.sh
 cd /root/server && sh scripts/fix-docker-mirror.sh
 ```
 
+Перезапустить Caddy и посмотреть выпуск HTTPS-сертификата
+(нужно после того, как DNS домена начал указывать на сервер):
+
+```bash
+cd /root/server && docker compose restart caddy && docker compose logs -f caddy
+```
+
+Выйти из просмотра логов — `Ctrl+C`.
+
 Обе команды выполняются **на VPS** по SSH (например, через Termius).
 `.env` и папка `data/` (база, треки, бэкапы) при обновлении не затрагиваются.
 
@@ -178,6 +187,50 @@ chmod +x scripts/*.sh docker-entrypoint.sh
 docker compose up -d --build
 docker compose logs -f api      # выйти: Ctrl+C
 ```
+
+## HTTPS-сертификат: выпуск и перевыпуск
+
+Caddy получает сертификат Let's Encrypt автоматически при первом запуске.
+Обязательное условие — домен уже должен указывать на этот сервер, иначе
+проверка владения доменом не пройдёт.
+
+Перезапустить Caddy и следить за выпуском:
+
+```bash
+cd /root/server && docker compose restart caddy && docker compose logs -f caddy
+```
+
+Выход из логов — `Ctrl+C`.
+
+Признак успеха в логах:
+
+```
+certificate obtained successfully
+```
+
+Если сертификат не выпускается, проверь по порядку:
+
+1. **DNS указывает на этот сервер.** Сравни вывод двух команд — они должны
+   совпадать:
+   ```bash
+   curl -s https://api.ipify.org; echo     # IP этого сервера
+   getent hosts bipmusic.ru                # куда смотрит домен
+   ```
+2. **Порты 80 и 443 открыты.** Let's Encrypt проверяет владение доменом через
+   порт 80. Если у хостинга включён внешний фаервол — открой оба порта.
+   ```bash
+   ss -lntp | grep -E ':80 |:443 '
+   ```
+3. **Порты не заняты другим веб-сервером** (nginx, apache). Если заняты:
+   ```bash
+   systemctl stop nginx apache2 && systemctl disable nginx apache2
+   docker compose restart caddy
+   ```
+
+Сертификаты хранятся в docker-томе `caddy_data` и переживают пересборку.
+Поэтому **никогда не выполняй `docker compose down -v`** — флаг `-v` удалит том
+вместе с сертификатами, и Let's Encrypt может упереться в лимит на повторные
+выпуски.
 
 ## Ошибка сборки: `failed to load metadata for docker.io/...`
 
