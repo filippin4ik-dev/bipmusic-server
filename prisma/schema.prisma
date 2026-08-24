@@ -1,0 +1,248 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id       String   @id @default(uuid())
+  email    String   @unique
+  password String
+  role     String   @default("USER")
+  profile  Profile?
+
+  playlists   Playlist[]
+  likedTracks LikedTrack[]
+  trackPlays  TrackPlay[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+}
+
+model Profile {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  nickname String  @unique
+  bio      String?
+  avatarUrl String?
+  status   String  @default("PENDING")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([nickname])
+}
+
+model Artist {
+  id       String @id @default(uuid())
+  name     String
+  bio      String?
+  imageUrl String?
+
+  albums       Album[]
+  tracks       Track[]
+  trackCredits TrackArtist[]
+  albumCredits AlbumArtist[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
+}
+
+model Album {
+  id       String @id @default(uuid())
+  title    String
+  year     Int?
+  coverUrl String?
+
+  artistId String
+  artist   Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  tracks Track[]
+  albumArtists AlbumArtist[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([artistId])
+  @@index([title])
+}
+
+model Track {
+  id        String @id @default(uuid())
+  title     String
+  duration  Int
+  filePath  String @unique
+  coverUrl  String?
+  playCount Int    @default(0)
+
+  // Encryption: AES-256-CTR. File on disk is ciphertext only (no IV header).
+  encrypted Boolean @default(false)
+  encKey    String? // 32-byte AES key, hex-encoded
+  encNonce  String? // 12-byte nonce (initial counter bytes 0..11), hex-encoded
+
+  artistId String
+  artist   Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  albumId String?
+  album   Album? @relation(fields: [albumId], references: [id], onDelete: SetNull)
+
+  playlistTracks PlaylistTrack[]
+  likedTracks    LikedTrack[]
+  plays          TrackPlay[]
+  keyGrants      KeyGrant[]
+  trackArtists   TrackArtist[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([artistId])
+  @@index([albumId])
+  @@index([title])
+}
+
+// Audit + rate limiting for decryption key handouts (Spotify-style key grants).
+model KeyGrant {
+  id        String   @id @default(uuid())
+  userId    String
+  trackId   String
+  track     Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  grantedAt DateTime @default(now())
+  ip        String?
+
+  @@index([userId, grantedAt])
+  @@index([trackId])
+}
+
+// Tracks failed login attempts for brute-force lockout.
+model LoginAttempt {
+  id        String   @id @default(uuid())
+  email     String
+  ip        String?
+  success   Boolean
+  attemptAt DateTime @default(now())
+
+  @@index([email, attemptAt])
+  @@index([ip, attemptAt])
+}
+
+// Refresh-token rotation: store hash of every issued refresh token.
+// When `revoked = true`, the token cannot be exchanged for a new pair.
+// On rotation we revoke the old one and persist the new one.
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  ip        String?
+
+  @@index([userId, revoked])
+}
+
+// Generic audit log (admin actions, key grants are in KeyGrant separately).
+model AuditEvent {
+  id        String   @id @default(uuid())
+  userId    String?
+  event     String   // e.g. "USER_APPROVED", "TRACK_UPLOADED", "TRACK_DELETED"
+  payload   String?  // JSON-encoded extra data
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([event, createdAt])
+  @@index([userId, createdAt])
+}
+
+model Playlist {
+  id          String @id @default(uuid())
+  title       String
+  description String?
+  coverUrl    String?
+  isPublic    Boolean @default(false)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tracks PlaylistTrack[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model PlaylistTrack {
+  playlistId String
+  playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+
+  trackId String
+  track   Track  @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  position Int
+  addedAt  DateTime @default(now())
+
+  @@id([playlistId, trackId])
+  @@index([trackId])
+}
+
+model LikedTrack {
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  trackId String
+  track   Track  @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  likedAt DateTime @default(now())
+
+  @@id([userId, trackId])
+  @@index([trackId])
+}
+
+model TrackPlay {
+  id                String @id @default(uuid())
+  userId            String
+  user              User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trackId           String
+  track             Track  @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  durationListened  Int
+  playedAt          DateTime @default(now())
+
+  @@index([userId])
+  @@index([trackId])
+  @@index([playedAt])
+}
+
+/// Featured / collaborating artists on a track (role = "feat").
+model TrackArtist {
+  trackId  String
+  track    Track  @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  artistId String
+  artist   Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  role     String @default("feat")
+  position Int    @default(0)
+
+  @@id([trackId, artistId])
+  @@index([artistId])
+}
+
+/// Featured artists on an album (role = "feat").
+model AlbumArtist {
+  albumId  String
+  album    Album  @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  artistId String
+  artist   Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  role     String @default("feat")
+  position Int    @default(0)
+
+  @@id([albumId, artistId])
+  @@index([artistId])
+}

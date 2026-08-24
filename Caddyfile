@@ -1,0 +1,33 @@
+# Caddy reverse proxy → bpMZ API.
+# Caddy auto-issues a Let's Encrypt cert for bipmusic.ru on first run.
+# `acme_email` is optional in modern Caddy and we don't set one (the user
+# Сертификаты Let's Encrypt для указанного домена включаются по умолчанию (глобально
+# `auto_https on` недопустим в Caddy 2 — см. ошибку «must be off|disable_*…».)
+#
+bipmusic.ru {
+    encode gzip zstd
+
+    # Large file uploads up to ~250 MB (admin upload)
+    request_body {
+        max_size 250MB
+    }
+
+    reverse_proxy api:3000 {
+        # Replace spoofed client XFF with the real edge client (Express uses the leftmost hop).
+        header_up X-Forwarded-For {http.request.remote.host}
+        header_up X-Forwarded-Proto {scheme}
+        header_up Host {host}
+
+        # Long timeouts so big admin uploads don't get cut off
+        transport http {
+            response_header_timeout 10m
+            dial_timeout 30s
+        }
+    }
+
+    # Block common bot/scanner paths
+    @bots {
+        path /.env /wp-admin/* /wp-login.php /phpmyadmin/* /.git/*
+    }
+    respond @bots 403
+}

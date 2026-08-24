@@ -1,0 +1,59 @@
+services:
+  api:
+    build: .
+    image: bpmz-api:latest
+    container_name: bpmz-api
+    restart: always
+    env_file: .env
+    environment:
+      SKIP_BOOT_MIGRATIONS: "1"
+    expose:
+      - "3000"
+    # ВСЕ данные на диске VPS: /root/server/data (не внутри контейнера).
+    # При падении/пересборке Docker файлы остаются здесь.
+    volumes:
+      - /root/server/data:/app/data
+    networks: [bpmz_net]
+
+  backup:
+    image: alpine:3.20
+    container_name: bpmz-backup
+    restart: always
+    volumes:
+      - ./:/server
+    environment:
+      BACKUP_INTERVAL_SEC: "${BACKUP_INTERVAL_SEC:-86400}"
+    command:
+      - /bin/sh
+      - -c
+      - |
+        apk add --no-cache tzdata >/dev/null
+        echo "[backup] every $${BACKUP_INTERVAL_SEC}s → /server/data/backups"
+        while true; do
+          sh /server/scripts/backup-data.sh /server || true
+          sleep "$${BACKUP_INTERVAL_SEC}"
+        done
+    networks: [bpmz_net]
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: bpmz-caddy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [api]
+    networks: [bpmz_net]
+
+networks:
+  bpmz_net:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

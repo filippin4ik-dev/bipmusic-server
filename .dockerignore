@@ -1,0 +1,12 @@
+node_modules
+dist
+release
+data
+.git
+.env
+.env.*
+!.env.example
+!.env.production.example
+npm-debug.log
+*.md
+supabase
