@@ -8,6 +8,10 @@
 #   --reset-password  применяет текущий ADMIN_PASSWORD из .env к уже созданной
 #                     учётке (смены пароля в API нет, а seed существующего
 #                     админа пропускает).
+#   --check           показывает, что реально лежит в базе, и проверяет пароль
+#                     из .env против сохранённого хеша. Нужен потому, что сервер
+#                     на «нет такого пользователя» и «неверный пароль» отвечает
+#                     одинаково — по сообщению причину не отличить.
 set -e
 cd "$(dirname "$0")/.."
 
@@ -25,9 +29,60 @@ echo "=================== ВХОД В АДМИНКУ ==================="
 echo "  Ник (вводить в приложении): ${NICK}"
 echo "  Пароль:                     ${PASS}"
 echo "  Email в базе:               ${EMAIL:-не задан}"
+echo "  Приложение отправит:        ${WANT}"
 echo "======================================================"
 
+require_api() {
+  docker compose ps --services --filter status=running 2>/dev/null | grep -q '^api$' && return 0
+  echo "Контейнер api не запущен. Сначала: docker compose up -d"
+  exit 1
+}
+
+if [ "$1" = "--check" ]; then
+  require_api
+  echo ""
+  echo "=== Что в базе ==="
+  docker compose exec -T -e CHECK_EMAIL="$WANT" -e CHECK_PASS="$PASS" api \
+    sh -c 'cat > /tmp/check-admin.mjs && node /tmp/check-admin.mjs' <<'JS'
+import { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcryptjs';
+
+const prisma = new PrismaClient();
+const email = process.env.CHECK_EMAIL;
+
+const users = await prisma.user.findMany({
+  include: { profile: true },
+  orderBy: { createdAt: 'asc' },
+});
+
+console.log(`  Пользователей: ${users.length}`);
+for (const u of users) {
+  console.log(
+    `   - ${u.email}  ник=${u.profile?.nickname ?? '—'}  роль=${u.role}  статус=${u.profile?.status ?? '—'}`
+  );
+}
+
+console.log('');
+const target = users.find((u) => u.email === email);
+if (!target) {
+  console.log(`  ✗ Пользователя ${email} в базе НЕТ`);
+  console.log('    Приложение получит «Неверный ник или пароль» независимо от пароля.');
+  console.log('    Починить: sh scripts/admin-credentials.sh --fix');
+} else if (await bcrypt.compare(process.env.CHECK_PASS ?? '', target.password)) {
+  console.log(`  ✓ Пароль из .env подходит к ${email} — вход должен работать`);
+} else {
+  console.log(`  ✗ Пароль из .env НЕ совпадает с хешем в базе`);
+  console.log('    Учётка создавалась с другим паролем.');
+  console.log('    Починить: sh scripts/admin-credentials.sh --reset-password');
+}
+
+await prisma.$disconnect();
+JS
+  exit 0
+fi
+
 if [ "$1" = "--reset-password" ]; then
+  require_api
   [ -n "$PASS" ] || { echo "ADMIN_PASSWORD в .env пуст"; exit 1; }
   echo ""
   echo "=== Применяю пароль из .env к учётке ${EMAIL} ==="
@@ -56,6 +111,7 @@ fi
 
 if [ "$EMAIL" = "$WANT" ]; then
   echo "✓ ADMIN_EMAIL согласован с тем, что отправляют приложения"
+  echo "  Если вход всё равно не проходит: sh scripts/admin-credentials.sh --check"
   exit 0
 fi
 
@@ -67,6 +123,7 @@ if [ "$1" != "--fix" ]; then
   exit 0
 fi
 
+require_api
 echo ""
 echo "=== Чиню ==="
 if grep -q '^ADMIN_EMAIL=' .env; then
