@@ -39,6 +39,17 @@ cd /root/server && docker compose restart caddy && docker compose logs -f caddy
 
 Выйти из просмотра логов — `Ctrl+C`.
 
+Приложение отправляет `@echo.local`, а в базе учётка на `@bpmz.local`:
+
+```bash
+cd /root/server && sh scripts/vps-git-update.sh && sh scripts/admin-credentials.sh --fix
+```
+
+Так и должно быть — `echo.local` зашит во всех клиентах (iOS, десктоп, веб),
+а `bpmz.local` попал в старый шаблон `.env` по ошибке. Команда переименовывает
+существующую учётку, а не заводит вторую: seed пропускает уже созданного админа,
+да и ник в базе уникален, поэтому дубль не создался бы.
+
 Забыл логин или пароль от админки:
 
 ```bash
