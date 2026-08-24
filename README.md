@@ -39,6 +39,15 @@ cd /root/server && docker compose restart caddy && docker compose logs -f caddy
 
 Выйти из просмотра логов — `Ctrl+C`.
 
+Забыл логин или пароль от админки:
+
+```bash
+cd /root/server && sh scripts/admin-credentials.sh
+```
+
+Скрипт покажет ник и пароль из `.env` и проверит, что `ADMIN_EMAIL`
+согласован с приложениями. Если нет — `sh scripts/admin-credentials.sh --fix`.
+
 Обе команды выполняются **на VPS** по SSH (например, через Termius).
 `.env` и папка `data/` (база, треки, бэкапы) при обновлении не затрагиваются.
 
@@ -390,6 +399,41 @@ curl -s https://bipmusic.ru/health
 🎵 bpMZ Backend running...
 ```
 
+---
+
+## Вход в админку
+
+```bash
+sh scripts/admin-credentials.sh
+```
+
+В приложении вводится **ник** (по умолчанию `admin`) и пароль из `ADMIN_PASSWORD`.
+
+Про email важно знать одну вещь: клиенты (iOS, десктоп, веб) не спрашивают
+адрес — они берут ник и достраивают его до `<ник>@echo.local`. Сервер в
+`/api/auth/login` ищет пользователя строго по email. Поэтому `ADMIN_EMAIL`
+обязан быть именно `<ADMIN_NICKNAME>@echo.local`; с любым другим доменом
+учётка создастся, но зайти в неё из приложения будет нельзя.
+
+Если сервер поднимался со старым `.env`, где стоял другой домен:
+
+```bash
+sh scripts/admin-credentials.sh --fix
+```
+
+Скрипт поправит `.env` и переименует уже созданную учётку, а не заведёт вторую
+(ник уникален, поэтому дубль просто не создался бы).
+
+Сменить пароль: смены пароля в API нет, а seed пропускает уже существующего
+админа — то есть просто поправить `ADMIN_PASSWORD` в `.env` недостаточно.
+Впиши новый пароль в `.env` и применяй его так:
+
+```bash
+sh scripts/admin-credentials.sh --reset-password
+```
+
+---
+
 ## Обновление
 
 ```bash
@@ -430,6 +474,7 @@ cd /root/server && docker compose restart      # перезапуск
 | `vps-git-update.sh` | **обновить код с GitHub и пересобрать** |
 | `vps-diagnose.sh` | если API не отвечает — диагностика по пунктам |
 | `vps-status.sh` | краткий статус: данные, база, контейнеры |
+| `admin-credentials.sh` | показать логин/пароль админа, починить email, сменить пароль |
 | `install-docker.sh` | установка Docker (вызывается автоматически) |
 | `backup-data.sh` | резервная копия `data/` |
 | `restore-data.sh` | восстановление из бэкапа |

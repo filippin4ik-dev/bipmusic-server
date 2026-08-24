@@ -83,6 +83,22 @@ fill_if_placeholder INVITE_CODES "invite-$(openssl rand -hex 4)"
 sed -i "s|^CORS_ORIGINS=.*|CORS_ORIGINS=https://${DOMAIN}|" .env
 grep -q '^DATABASE_URL=' .env || echo 'DATABASE_URL="file:./data/bpmz.db"' >> .env
 
+# Клиенты входят по нику и сами достраивают его до <ник>@echo.local, а сервер
+# ищет пользователя строго по email. Любой другой домен здесь = вход в админку
+# невозможен ни из iOS, ни из десктопа.
+ADMIN_NICK=$(grep '^ADMIN_NICKNAME=' .env 2>/dev/null | head -1 | cut -d= -f2-)
+[ -z "$ADMIN_NICK" ] && ADMIN_NICK="admin"
+WANT_EMAIL="${ADMIN_NICK}@echo.local"
+HAVE_EMAIL=$(grep '^ADMIN_EMAIL=' .env 2>/dev/null | head -1 | cut -d= -f2-)
+if [ "$HAVE_EMAIL" != "$WANT_EMAIL" ]; then
+  if grep -q '^ADMIN_EMAIL=' .env; then
+    sed -i "s|^ADMIN_EMAIL=.*|ADMIN_EMAIL=${WANT_EMAIL}|" .env
+  else
+    printf 'ADMIN_EMAIL=%s\n' "$WANT_EMAIL" >> .env
+  fi
+  echo "  → ADMIN_EMAIL приведён к ${WANT_EMAIL} (было: ${HAVE_EMAIL:-пусто})"
+fi
+
 # --- 4. Проверка DNS -------------------------------------------------------
 echo ""
 echo "=== Проверка DNS ==="
