@@ -38,12 +38,19 @@ require_api() {
   exit 1
 }
 
+# Node ищет node_modules только вверх от папки самого файла, поэтому скрипт
+# обязан лежать внутри /app — из /tmp он до /app/node_modules не доберётся и
+# упадёт с "Cannot find package '@prisma/client'". /app/data всегда доступен
+# на запись: это смонтированный том.
+MJS=/app/data/.admin-op.mjs
+RUN_MJS="cat > $MJS && node $MJS; rc=\$?; rm -f $MJS; exit \$rc"
+
 if [ "$1" = "--check" ]; then
   require_api
   echo ""
   echo "=== Что в базе ==="
   docker compose exec -T -e CHECK_EMAIL="$WANT" -e CHECK_PASS="$PASS" api \
-    sh -c 'cat > /tmp/check-admin.mjs && node /tmp/check-admin.mjs' <<'JS'
+    sh -c "$RUN_MJS" <<'JS'
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
@@ -87,7 +94,7 @@ if [ "$1" = "--reset-password" ]; then
   echo ""
   echo "=== Применяю пароль из .env к учётке ${EMAIL} ==="
   docker compose exec -T -e RESET_EMAIL="$EMAIL" -e RESET_PASS="$PASS" api \
-    sh -c 'cat > /tmp/reset-admin.mjs && node /tmp/reset-admin.mjs' <<'JS'
+    sh -c "$RUN_MJS" <<'JS'
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
@@ -136,7 +143,7 @@ echo "  .env обновлён → ADMIN_EMAIL=${WANT}"
 # Учётка уже могла быть создана со старым email — переименовываем её, а не
 # заводим вторую: nickname уникален, и seed молча не смог бы создать дубль.
 docker compose exec -T -e FIX_NICK="$NICK" -e FIX_EMAIL="$WANT" api \
-  sh -c 'cat > /tmp/fix-admin.mjs && node /tmp/fix-admin.mjs' <<'JS'
+  sh -c "$RUN_MJS" <<'JS'
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
