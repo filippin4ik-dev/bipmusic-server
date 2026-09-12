@@ -67,6 +67,20 @@ const UpdateUserSchema = z.object({
   status: z.enum(['PENDING', 'APPROVED', 'REJECTED']),
 });
 
+const LYRICS_MAX_CHARS = 20000;
+
+/**
+ * Текст песни как его прислала админка. Формат (обычный текст или LRC с метками
+ * времени) распознаёт клиент, поэтому здесь только приведение к единым переводам
+ * строк и защита от гигантской вставки. Пустая строка = «убрать текст».
+ */
+function normalizeLyrics(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.replace(/\r\n?/g, '\n').trim();
+  if (!text) return null;
+  return text.slice(0, LYRICS_MAX_CHARS);
+}
+
 function safeUnlink(p: string) {
   try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch {}
 }
@@ -320,7 +334,7 @@ router.post(
       return res.status(400).json({ error: 'Файл не похож на аудио' });
     }
 
-    const { title, artistId, albumId, duration } = req.body;
+    const { title, artistId, albumId, duration, lyrics } = req.body;
     const featArtistIds = parseFeatArtistIds(req.body.featArtistIds);
     console.log(
       `${logPrefix} meta title="${title}" artistId=${artistId} albumId=${albumId ?? 'null'} duration=${duration ?? 0}`
@@ -360,6 +374,7 @@ router.post(
           duration: parseInt(String(duration ?? 0), 10) || 0,
           filePath: encName,
           coverUrl: coverName,
+          lyrics: normalizeLyrics(lyrics),
           encrypted: true,
           encKey: material.keyHex,
           encNonce: material.nonceHex,
@@ -413,7 +428,7 @@ router.post('/tracks/:id/cover', requireAdmin, coverUpload.single('cover'), asyn
 });
 
 router.put('/tracks/:id', requireAdmin, async (req: AuthRequest, res: Response) => {
-  const { title, artistId, albumId, duration } = req.body;
+  const { title, artistId, albumId, duration, lyrics } = req.body;
   await prisma.track.update({
     where: { id: req.params.id },
     data: {
@@ -421,6 +436,7 @@ router.put('/tracks/:id', requireAdmin, async (req: AuthRequest, res: Response) 
       artistId,
       albumId: albumId === undefined ? undefined : (albumId || null),
       duration: duration === undefined ? undefined : parseInt(String(duration), 10),
+      lyrics: lyrics === undefined ? undefined : normalizeLyrics(lyrics),
     },
   });
   if (req.body.featArtistIds !== undefined) {

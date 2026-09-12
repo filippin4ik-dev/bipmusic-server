@@ -84,6 +84,10 @@ model Track {
   coverUrl  String?
   playCount Int    @default(0)
 
+  // Текст песни. Обычный текст либо LRC с метками времени («[01:23.45] строка») —
+  // формат распознаёт клиент, поэтому админу не нужно выбирать вид заранее.
+  lyrics String?
+
   // Encryption: AES-256-CTR. File on disk is ciphertext only (no IV header).
   encrypted Boolean @default(false)
   encKey    String? // 32-byte AES key, hex-encoded

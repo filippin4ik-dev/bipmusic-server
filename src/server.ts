@@ -17,6 +17,7 @@ import playlistsRoutes from './api/playlists.js';
 import likesRoutes from './api/likes.js';
 import statsRoutes from './api/stats.js';
 import adminRoutes from './api/admin.js';
+import shareRoutes from './api/share.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/logger.js';
 import { globalLimiter } from './middleware/rateLimits.js';
@@ -103,6 +104,10 @@ app.use(globalLimiter);
 // Cover files served statically (covers are not sensitive enough to encrypt;
 // they're authenticated nowhere — same as the old site's `covers` bucket signed URLs).
 app.use('/files/covers', express.static(COVERS_DIR, { maxAge: '7d' }));
+
+// Публичная страница трека для ссылок «поделиться» из приложения.
+// Отдаёт только название, артиста и обложку — под общим лимитом на IP.
+app.use('/t', shareRoutes);
 
 // API Routes
 app.use('/api/auth', authRoutes);
