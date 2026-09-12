@@ -23,6 +23,14 @@ cd /root/server && sh scripts/vps-git-update.sh
 cd /root/server && sh scripts/vps-diagnose.sh
 ```
 
+Каталог пустой, треки пропали — восстановить базу из бэкапа:
+
+```bash
+cd /root/server && sh scripts/restore-data.sh && docker compose restart api
+```
+
+Разбор по шагам — [Пропали треки: каталог пустой](#пропали-треки-каталог-пустой).
+
 Если сборка падает с `failed to load metadata for docker.io/...`
 (Docker Hub блокирует российские IP):
 
@@ -333,6 +341,130 @@ git log --oneline -5          # найти нужный коммит
 git reset --hard <хеш>
 docker compose up -d --build
 ```
+
+## Пропали треки: каталог пустой
+
+Обновление кода само по себе треки удалить не может. Папка `data/` (база, треки,
+обложки, бэкапы) перечислена в `.gitignore`, ни один файл из неё не отслеживается
+git, поэтому `git reset --hard` её не касается. Схема базы при обновлении не
+меняется, а значит `prisma db push` ничего не переносит и не удаляет; seed
+пропускает уже созданного админа. В скриптах деплоя нет ни `rm -rf data`, ни
+`down -v`, ни `migrate reset`.
+
+Пустой каталог почти всегда означает одно: контейнер не нашёл файл базы
+`data/bpmz.db`, создал вместо неё пустую и завёл заново только админа. Сам файл
+при этом обычно жив — просто лежит не в той папке, которую монтирует контейнер.
+
+Правильная база — **`bpmz.db`**, одна и только она:
+
+| Где | Путь |
+|-----|------|
+| На VPS | `/root/server/data/bpmz.db` |
+| Внутри контейнера | `/app/data/bpmz.db` |
+| В `.env` | `DATABASE_URL="file:./data/bpmz.db"` |
+
+`groov.db` — имя из старой версии проекта, его отсутствие нормально. Entrypoint
+один раз скопирует `groov.db` → `bpmz.db`, если второго ещё нет, и больше к нему
+не возвращается.
+
+**Ключи шифрования треков хранятся в базе** (`encKey` и `encNonce` в таблице
+`Track`, свой ключ на каждый трек). Файлы из `data/tracks/` без базы расшифровать
+нельзя, поэтому восстанавливать нужно именно `bpmz.db`.
+
+### Шаг 1. Не пересобирать сервер, пока не разобрался
+
+При каждом старте entrypoint копирует текущую базу в
+`data/backups/bpmz-latest.db` и хранит последние 8 снимков. Если сейчас запущена
+пустая база, лишние перезапуски вытеснят из этой очереди хорошие копии.
+
+### Шаг 2. Что сказал сервер при старте
+
+```bash
+cd /root/server && docker compose logs api | grep '\[entrypoint\]' | head -20
+```
+
+Что искать в выводе:
+
+| Строка | Что значит |
+|--------|-----------|
+| `Volume OK: /app/data смонтирован с хоста` | папка с данными подключена верно |
+| `ERROR: /app/data НЕ смонтирован` | данные писались внутрь контейнера и пропали при пересборке |
+| `Database OK (N bytes)` | база на месте, причина не в ней |
+| `Базы нет — создастся при db push` | файл базы не найден — это наш случай |
+| `WARNING: N аудиофайлов на диске, но БД пустая!` | треки целы, потерялась только база |
+
+### Шаг 3. Куда смотрит контейнер и что там лежит
+
+```bash
+docker exec bpmz-api sh -c 'echo "$DATABASE_URL"; grep " /app/data " /proc/mounts || echo "НЕТ МОНТИРОВАНИЯ"; ls -la /app/data'
+```
+
+### Шаг 4. Найти базу и бэкапы на всей машине
+
+```bash
+find / -xdev \( -name 'bpmz*.db' -o -name 'groov*.db' -o -name 'bpmz-data-*.tar.gz' \) -size +1k -exec ls -lh {} \; 2>/dev/null
+```
+
+Отдельно тома и слои Docker — на случай, если сервер когда-то стартовал без
+volume:
+
+```bash
+find /var/lib/docker -name 'bpmz*.db' -size +1k -exec ls -lh {} \; 2>/dev/null
+```
+
+Файл от сотен килобайт и больше — это рабочая база. Архив `bpmz-data-*.tar.gz`
+содержит и базу, и сами треки с обложками.
+
+### Шаг 5. Проверить `.env`
+
+```bash
+grep -E '^(DATABASE_URL|TRACKS_DIR|COVERS_DIR)=' /root/server/.env
+```
+
+Должно быть `DATABASE_URL="file:./data/bpmz.db"`. Любой другой путь entrypoint
+в production не пропустит и остановит запуск.
+
+### Шаг 6. Восстановить
+
+Из бэкапов проекта — сам выберет самый свежий снимок:
+
+```bash
+cd /root/server && sh scripts/restore-data.sh && docker compose restart api
+```
+
+Если база нашлась в другом месте, положить её на канонический путь вручную.
+API обязательно остановить, иначе он перетрёт файл своей пустой базой:
+
+```bash
+cd /root/server
+docker compose stop api
+cp /путь/где/нашлась/bpmz.db data/bpmz.db
+docker compose start api
+docker compose logs --tail 20 api | grep '\[entrypoint\]'
+```
+
+Из архива (подставь имя файла из шага 4):
+
+```bash
+cd /root/server
+docker compose stop api
+tar xzf data/backups/bpmz-data-ГГГГММДД-ЧЧММСС.tar.gz -C .
+docker compose start api
+```
+
+После восстановления в логе должно быть `Database OK (N bytes)`, а треки —
+в приложении.
+
+### Шаг 7. Сколько записей реально в базе
+
+```bash
+docker exec bpmz-api node -e 'const {PrismaClient}=require("@prisma/client");const p=new PrismaClient();Promise.all([p.track.count(),p.album.count(),p.artist.count(),p.user.count()]).then(([t,a,r,u])=>console.log("треки:",t,"альбомы:",a,"артисты:",r,"пользователи:",u)).finally(()=>p.$disconnect())'
+```
+
+### Единственный способ удалить треки из приложения
+
+Удаление артиста в админке (`DELETE /api/admin/artists/:id`) каскадом убирает все
+его треки и альбомы. Кроме этого в коде нет ни одного массового удаления треков.
 
 ---
 
