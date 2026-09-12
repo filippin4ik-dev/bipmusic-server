@@ -1,7 +1,7 @@
 import express, { Response } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
 import { prisma } from '../db.js';
-import { stripCryptoFields } from '../utils/stripCrypto.js';
+import { trackInclude, serializeTrack } from '../utils/trackSerialize.js';
 
 const router = express.Router();
 
@@ -10,13 +10,18 @@ router.get('/plays', authenticate, async (req: AuthRequest, res: Response) => {
   const plays = await prisma.trackPlay.findMany({
     where: { userId: req.userId },
     include: {
-      track: { include: { artist: true } }
+      track: { include: trackInclude }
     },
     orderBy: { playedAt: 'desc' },
     take: 100
   });
 
-  res.json({ data: stripCryptoFields(plays) });
+  res.json({
+    data: plays.map((p) => ({
+      ...p,
+      track: p.track ? serializeTrack(p.track) : p.track,
+    })),
+  });
 });
 
 // GET /api/stats/top-artists
@@ -78,15 +83,15 @@ router.get('/top-tracks', authenticate, async (req: AuthRequest, res: Response) 
     topTracks.map(({ trackId, _count }) =>
       prisma.track.findUnique({
         where: { id: trackId },
-        include: { artist: true }
+        include: trackInclude
       }).then(track => ({
-        track,
+        track: track ? serializeTrack(track) : track,
         playCount: _count.id
       }))
     )
   );
 
-  res.json({ data: stripCryptoFields(tracks) });
+  res.json({ data: tracks });
 });
 
 // POST /api/stats/play

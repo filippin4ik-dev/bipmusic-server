@@ -79,8 +79,16 @@ export function serializeTrack<T extends TrackRow>(track: T): Record<string, unk
   );
   const { trackArtists, encKey, encNonce, album, ...rest } = track;
   const serializedAlbum = album ? serializeAlbum(album) : null;
+  // A track that belongs to an album shows the album artwork. Resolving it here
+  // instead of copying the filename into Track.coverUrl keeps one file per cover
+  // (so deleting a track can never unlink the album's image) and lets the track's
+  // own cover come back if it is ever detached from the album.
+  const albumCover = album?.coverUrl;
+  const coverUrl =
+    typeof albumCover === 'string' && albumCover ? albumCover : rest.coverUrl ?? null;
   return stripCryptoFields({
     ...rest,
+    coverUrl,
     album: serializedAlbum,
     featuredArtists,
   }) as Record<string, unknown>;
