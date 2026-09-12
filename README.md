@@ -552,6 +552,42 @@ docker compose start api
 docker exec bpmz-api node -e 'const {PrismaClient}=require("@prisma/client");const p=new PrismaClient();Promise.all([p.track.count(),p.album.count(),p.artist.count(),p.user.count()]).then(([t,a,r,u])=>console.log("треки:",t,"альбомы:",a,"артисты:",r,"пользователи:",u)).finally(()=>p.$disconnect())'
 ```
 
+### Если база не нашлась
+
+Сначала глубокий поиск — вдруг остался слой удалённого контейнера или старый
+контейнер целиком:
+
+```bash
+docker ps -a --format '{{.Names}}\t{{.Status}}\t{{.CreatedAt}}'
+find /var/lib/docker -name '*.db' -size +20k -exec ls -lh {} \; 2>/dev/null
+find / -xdev -name '*.db' -size +20k -exec ls -lh {} \; 2>/dev/null
+ls -lh /root/server/data/backups/ 2>/dev/null
+```
+
+Найденный файл можно проверить, не подменяя рабочую базу:
+
+```bash
+docker cp /НАЙДЕННЫЙ/ПУТЬ/bpmz.db bpmz-api:/tmp/check.db
+docker exec -e DATABASE_URL=file:/tmp/check.db bpmz-api node -e 'const {PrismaClient}=require("@prisma/client");const p=new PrismaClient();p.track.count().then(n=>console.log("треков в этой базе:",n)).finally(()=>p.$disconnect())'
+```
+
+Если треков там больше, чем сейчас в приложении — положить на место:
+
+```bash
+cp /НАЙДЕННЫЙ/ПУТЬ/bpmz.db /root/server/data/bpmz.db.candidate
+cd /root/server && sh scripts/fix-db-path.sh   # предпочтёт файл крупнее
+```
+
+Шансы невысокие: Docker удаляет writable-слой сразу вместе с контейнером. Если
+ничего не нашлось, остаётся снапшот диска у хостера (если включён) или повторная
+загрузка треков из оригиналов.
+
+**Файлы из `data/tracks` без базы бесполезны.** Ключ AES у каждого трека свой,
+генерируется при загрузке через `crypto.randomBytes` и хранится только в колонках
+`encKey`/`encNonce`. Мастер-ключа нет, вывести ключ из чего-либо ещё нельзя,
+поэтому расшифровать `.enc` без базы невозможно. Это же причина держать
+`data/backups` в порядке: бэкап базы важнее бэкапа аудиофайлов.
+
 ### Единственный способ удалить треки из приложения
 
 Удаление артиста в админке (`DELETE /api/admin/artists/:id`) каскадом убирает все
