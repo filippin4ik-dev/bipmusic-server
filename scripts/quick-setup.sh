@@ -81,7 +81,10 @@ fill_if_placeholder INVITE_CODES "invite-$(openssl rand -hex 4)"
 
 # Домен и путь к базе — приводим к актуальным значениям.
 sed -i "s|^CORS_ORIGINS=.*|CORS_ORIGINS=https://${DOMAIN}|" .env
-grep -q '^DATABASE_URL=' .env || echo 'DATABASE_URL="file:./data/bpmz.db"' >> .env
+grep -q '^DATABASE_URL=' .env || echo 'DATABASE_URL="file:/app/data/bpmz.db"' >> .env
+# Относительный путь уводил базу в /app/prisma/data (Prisma резолвит его от папки
+# со схемой) — там она жила в слое контейнера и пропадала при пересборке.
+sed -i -E 's|^DATABASE_URL="?file:(\./)?data/bpmz\.db"?[[:space:]]*$|DATABASE_URL="file:/app/data/bpmz.db"|' .env
 
 # Клиенты входят по нику и сами достраивают его до <ник>@echo.local, а сервер
 # ищет пользователя строго по email. Любой другой домен здесь = вход в админку

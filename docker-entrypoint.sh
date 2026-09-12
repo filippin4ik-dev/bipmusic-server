@@ -2,9 +2,14 @@
 set -e
 
 # Единственный путь к БД в проде — не менять после заливки треков.
+# Путь абсолютный намеренно: относительный file:-путь Prisma резолвит от папки
+# со схемой (/app/prisma), а не от рабочей папки процесса, поэтому
+# file:./data/bpmz.db создавал базу в /app/prisma/data — внутри контейнера,
+# мимо смонтированного тома, и она пропадала при каждой пересборке.
 CANONICAL_DB="/app/data/bpmz.db"
-CANONICAL_URL="file:./data/bpmz.db"
+CANONICAL_URL="file:/app/data/bpmz.db"
 LEGACY_DB="/app/data/groov.db"
+MISPLACED_DIR="/app/prisma/data"
 BACKUP_DIR="/app/data/backups"
 
 mkdir -p /app/data/tracks /app/data/covers /app/data/tmp /app/data/backups
@@ -23,7 +28,11 @@ else
 fi
 
 # --- DATABASE_URL: всегда один файл ---
+# Старые относительные значения из уже развёрнутых .env принимаются и
+# переписываются на абсолютный путь — иначе Prisma снова уйдёт в /app/prisma/data.
 case "${DATABASE_URL:-}" in
+  file:/app/data/bpmz.db)
+    ;;
   file:./data/bpmz.db|file:data/bpmz.db|"")
     export DATABASE_URL="$CANONICAL_URL"
     ;;
@@ -31,7 +40,7 @@ case "${DATABASE_URL:-}" in
     echo "[entrypoint] WARNING: DATABASE_URL=${DATABASE_URL}"
     echo "[entrypoint] Ожидается: ${CANONICAL_URL}"
     if [ "${NODE_ENV:-}" = "production" ]; then
-      echo "[entrypoint] В production должен быть file:./data/bpmz.db в .env"
+      echo "[entrypoint] В production должен быть file:/app/data/bpmz.db в .env"
       exit 1
     fi
     ;;
@@ -44,6 +53,18 @@ echo "[entrypoint] DB file: ${DB_FILE}"
 db_nonempty() {
   [ -f "$1" ] && [ -s "$1" ]
 }
+
+# База из /app/prisma/data → на том (один раз).
+# Туда её уводил относительный file:-путь; папка лежит в слое контейнера, так что
+# успеть перенести можно только до пересборки — при ней слой удаляется вместе с базой.
+for misplaced in "$MISPLACED_DIR/bpmz.db" "$MISPLACED_DIR/groov.db"; do
+  if ! db_nonempty "$DB_FILE" && db_nonempty "$misplaced"; then
+    echo "[entrypoint] База найдена в ${misplaced} → переносим на том"
+    cp "$misplaced" "$DB_FILE"
+    cp "$misplaced-wal" "$DB_FILE-wal" 2>/dev/null || true
+    cp "$misplaced-shm" "$DB_FILE-shm" 2>/dev/null || true
+  fi
+done
 
 # Старый groov.db → bpmz.db (один раз)
 if ! db_nonempty "$DB_FILE" && db_nonempty "$LEGACY_DB"; then

@@ -21,6 +21,17 @@ echo ""
 echo "=== .env DATABASE_URL ==="
 grep '^DATABASE_URL=' .env 2>/dev/null || echo "  (нет .env или DATABASE_URL)"
 
+# Относительный file:-путь Prisma резолвит от папки со схемой, поэтому база могла
+# уехать в /app/prisma/data — в слой контейнера, где пропадёт при пересборке.
+echo ""
+echo "=== База внутри контейнера, мимо тома (/app/prisma/data) ==="
+if docker exec bpmz-api sh -c 'ls -l /app/prisma/data/*.db' 2>/dev/null; then
+  echo "  ВНИМАНИЕ: база лежит в слое контейнера — перенеси её ДО пересборки:"
+  echo "  docker compose stop api && docker cp bpmz-api:/app/prisma/data/bpmz.db $ROOT/data/bpmz.db && docker compose start api"
+else
+  echo "  чисто (или контейнер не запущен)"
+fi
+
 echo ""
 echo "=== Docker ==="
 docker compose ps 2>/dev/null || docker ps --filter name=bpmz
