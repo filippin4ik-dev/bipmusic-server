@@ -145,13 +145,10 @@ router.get('/:id/stream', authenticate, requireApproved, async (req: AuthRequest
   const range = req.headers.range;
   const contentType = track.encrypted ? 'application/octet-stream' : 'audio/mpeg';
 
-  // Record play (best-effort).
-  prisma.trackPlay
-    .create({ data: { userId: req.userId!, trackId: track.id, durationListened: 0 } })
-    .catch(() => {});
-  prisma.track
-    .update({ where: { id: track.id }, data: { playCount: { increment: 1 } } })
-    .catch(() => {});
+  // Прослушивание здесь не записывается. Выдача файла — плохой признак:
+  // так в статистику попадала загрузка трека «в офлайн», а воспроизведение из
+  // кеша не попадало вовсе, да и клиент присылает своё событие в /stats/play,
+  // из-за чего каждое прослушивание считалось дважды.
 
   if (range) {
     const parts = range.replace(/bytes=/, '').split('-');

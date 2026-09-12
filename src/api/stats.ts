@@ -24,47 +24,79 @@ router.get('/plays', authenticate, async (req: AuthRequest, res: Response) => {
   });
 });
 
+// GET /api/stats/summary
+// Итоги по всей истории, а не по первой странице: клиент раньше показывал в
+// карточках длину топ-листа (максимум 10), что статистикой можно назвать с трудом.
+router.get('/summary', authenticate, async (req: AuthRequest, res: Response) => {
+  const userId = req.userId;
+
+  const [totalPlays, listened, playedTracks] = await Promise.all([
+    prisma.trackPlay.count({ where: { userId } }),
+    prisma.trackPlay.aggregate({
+      where: { userId },
+      _sum: { durationListened: true },
+    }),
+    prisma.trackPlay.findMany({
+      where: { userId },
+      distinct: ['trackId'],
+      select: { trackId: true },
+    }),
+  ]);
+
+  const trackIds = playedTracks.map((p) => p.trackId);
+  const artists = trackIds.length
+    ? await prisma.track.findMany({
+        where: { id: { in: trackIds } },
+        distinct: ['artistId'],
+        select: { artistId: true },
+      })
+    : [];
+
+  res.json({
+    totalPlays,
+    uniqueTracks: trackIds.length,
+    uniqueArtists: artists.length,
+    totalSeconds: listened._sum.durationListened ?? 0,
+  });
+});
+
 // GET /api/stats/top-artists
 router.get('/top-artists', authenticate, async (req: AuthRequest, res: Response) => {
   const limit = Math.min(50, parseInt(req.query.limit as string) || 10);
 
-  const topArtists = await prisma.trackPlay.groupBy({
+  const playsByTrack = await prisma.trackPlay.groupBy({
     by: ['trackId'],
     where: { userId: req.userId },
     _count: { id: true },
-    orderBy: { _count: { id: 'desc' } },
-    take: limit * 2 // Get more to avoid duplicates after grouping by artist
   });
+  if (!playsByTrack.length) return res.json({ data: [] });
 
-  // Map to artists
+  // Один запрос на все треки вместо findUnique в цикле: иначе на длинной
+  // истории прослушиваний это сотни обращений к SQLite подряд.
+  const tracks = await prisma.track.findMany({
+    where: { id: { in: playsByTrack.map((p) => p.trackId) } },
+    select: { id: true, artistId: true },
+  });
+  const artistByTrack = new Map(tracks.map((t) => [t.id, t.artistId]));
+
   const artistCounts = new Map<string, number>();
-
-  for (const play of topArtists) {
-    const track = await prisma.track.findUnique({
-      where: { id: play.trackId },
-      select: { artistId: true }
-    });
-
-    if (track) {
-      const current = artistCounts.get(track.artistId) || 0;
-      artistCounts.set(track.artistId, current + play._count.id);
-    }
+  for (const play of playsByTrack) {
+    const artistId = artistByTrack.get(play.trackId);
+    if (!artistId) continue;
+    artistCounts.set(artistId, (artistCounts.get(artistId) ?? 0) + play._count.id);
   }
 
-  const sorted = Array.from(artistCounts.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, limit);
+  const sorted = [...artistCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit);
+  const artistRows = await prisma.artist.findMany({
+    where: { id: { in: sorted.map(([id]) => id) } },
+  });
+  const artistById = new Map(artistRows.map((a) => [a.id, a]));
 
-  const artists = await Promise.all(
-    sorted.map(([artistId, count]) =>
-      prisma.artist.findUnique({ where: { id: artistId } }).then(artist => ({
-        artist,
-        playCount: count
-      }))
-    )
-  );
-
-  res.json({ data: artists });
+  res.json({
+    data: sorted
+      .map(([artistId, playCount]) => ({ artist: artistById.get(artistId) ?? null, playCount }))
+      .filter((row) => row.artist !== null),
+  });
 });
 
 // GET /api/stats/top-tracks
@@ -79,37 +111,49 @@ router.get('/top-tracks', authenticate, async (req: AuthRequest, res: Response) 
     take: limit
   });
 
-  const tracks = await Promise.all(
-    topTracks.map(({ trackId, _count }) =>
-      prisma.track.findUnique({
-        where: { id: trackId },
-        include: trackInclude
-      }).then(track => ({
-        track: track ? serializeTrack(track) : track,
-        playCount: _count.id
-      }))
-    )
-  );
+  const rows = await prisma.track.findMany({
+    where: { id: { in: topTracks.map((t) => t.trackId) } },
+    include: trackInclude,
+  });
+  const byId = new Map(rows.map((t) => [t.id, t]));
 
-  res.json({ data: tracks });
+  res.json({
+    data: topTracks
+      .filter(({ trackId }) => byId.has(trackId))
+      .map(({ trackId, _count }) => ({
+        track: serializeTrack(byId.get(trackId)!),
+        playCount: _count.id,
+      })),
+  });
 });
 
 // POST /api/stats/play
+// Единственное место, где прослушивание попадает в статистику. Клиент
+// присылает его, когда трек действительно послушали, а не когда начали
+// качать файл, — поэтому /tracks/:id/stream ничего больше не считает.
 router.post('/play', authenticate, async (req: AuthRequest, res: Response) => {
-  const { trackId, durationListened } = req.body;
+  const trackId = typeof req.body?.trackId === 'string' ? req.body.trackId : '';
+  if (!trackId) return res.status(400).json({ error: 'trackId обязателен' });
+
+  const track = await prisma.track.findUnique({
+    where: { id: trackId },
+    select: { id: true, duration: true },
+  });
+  if (!track) return res.status(404).json({ error: 'Track not found' });
+
+  // Длительность из клиента — подсказка, а не истина: секунды больше самого
+  // трека (или отрицательные) сломали бы сумму в /summary.
+  const raw = Number(req.body?.durationListened ?? 0);
+  const cap = track.duration > 0 ? track.duration : 24 * 60 * 60;
+  const durationListened = Number.isFinite(raw) ? Math.min(Math.max(0, Math.round(raw)), cap) : 0;
 
   const play = await prisma.trackPlay.create({
-    data: {
-      userId: req.userId!,
-      trackId,
-      durationListened: durationListened || 0
-    }
+    data: { userId: req.userId!, trackId, durationListened },
   });
 
-  // Increment play count
   await prisma.track.update({
     where: { id: trackId },
-    data: { playCount: { increment: 1 } }
+    data: { playCount: { increment: 1 } },
   });
 
   res.status(201).json(play);
