@@ -12,6 +12,7 @@ import { revokeAllForUser } from '../services/refreshTokenService.js';
 import {
   trackInclude,
   albumInclude,
+  albumDetailInclude,
   serializeTrack,
   serializeTracks,
   serializeAlbum,
@@ -81,8 +82,61 @@ function normalizeLyrics(value: unknown): string | null {
   return text.slice(0, LYRICS_MAX_CHARS);
 }
 
+const BIO_MAX_CHARS = 4000;
+
+/** Биография артиста: пустая строка означает «убрать описание». */
+function normalizeBio(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.replace(/\r\n?/g, '\n').trim();
+  if (!text) return null;
+  return text.slice(0, BIO_MAX_CHARS);
+}
+
 function safeUnlink(p: string) {
   try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch {}
+}
+
+/**
+ * Заносит текущее главное фото артиста в галерею, если его там ещё нет.
+ *
+ * У артистов, заведённых до галереи, фото живёт только в `Artist.imageUrl`.
+ * Без этого шага такой файл остался бы никому не известен: галерея про него не
+ * знает, удалить его из админки нельзя, а при замене главного фото он бы просто
+ * потерялся на диске.
+ */
+async function ensurePrimaryInGallery(artistId: string, imageUrl: string | null) {
+  if (!imageUrl) return;
+  const existing = await prisma.artistPhoto.findUnique({
+    where: { artistId_imageUrl: { artistId, imageUrl } },
+  });
+  if (existing) return;
+  const last = await prisma.artistPhoto.findFirst({
+    where: { artistId },
+    orderBy: { position: 'desc' },
+  });
+  await prisma.artistPhoto.create({
+    data: { artistId, imageUrl, position: (last?.position ?? -1) + 1 },
+  });
+}
+
+/** Файл обложки удаляем только когда на него больше никто не ссылается. */
+async function unlinkPhotoIfUnused(imageUrl: string) {
+  const [inGallery, asPrimary, onAlbums, onTracks] = await Promise.all([
+    prisma.artistPhoto.count({ where: { imageUrl } }),
+    prisma.artist.count({ where: { imageUrl } }),
+    prisma.album.count({ where: { coverUrl: imageUrl } }),
+    prisma.track.count({ where: { coverUrl: imageUrl } }),
+  ]);
+  if (inGallery + asPrimary + onAlbums + onTracks === 0) {
+    safeUnlink(path.resolve(COVERS_DIR, imageUrl));
+  }
+}
+
+async function artistWithPhotos(artistId: string) {
+  return prisma.artist.findUnique({
+    where: { id: artistId },
+    include: { photos: { orderBy: { position: 'asc' } } },
+  });
 }
 
 // =====================================================================
@@ -131,7 +185,11 @@ router.delete('/users/:id', requireAdmin, async (req: AuthRequest, res: Response
 
 router.get('/artists', requireAdmin, async (_req: AuthRequest, res: Response) => {
   const artists = await prisma.artist.findMany({
-    include: { albums: true, _count: { select: { tracks: true } } },
+    include: {
+      albums: true,
+      photos: { orderBy: { position: 'asc' } },
+      _count: { select: { tracks: true } },
+    },
     orderBy: { name: 'asc' },
   });
   res.json({ data: artists });
@@ -147,10 +205,13 @@ router.post('/artists', requireAdmin, async (req: AuthRequest, res: Response) =>
 
 router.put('/artists/:id', requireAdmin, async (req: AuthRequest, res: Response) => {
   const { name, bio } = req.body;
-  const artist = await prisma.artist.update({
-    where: { id: req.params.id },
-    data: { name: name?.trim(), bio: bio ?? null },
-  });
+  const data: Record<string, unknown> = {};
+  if (name !== undefined) data.name = String(name).trim();
+  if (bio !== undefined) data.bio = normalizeBio(bio);
+
+  await prisma.artist.update({ where: { id: req.params.id }, data });
+  const artist = await artistWithPhotos(req.params.id);
+  if (!artist) return res.status(404).json({ error: 'Artist not found' });
   await audit({ userId: req.userId, event: 'ARTIST_UPDATED', payload: { artistId: artist.id } });
   res.json(artist);
 });
@@ -162,9 +223,18 @@ router.delete('/artists/:id', requireAdmin, async (req: AuthRequest, res: Respon
     safeUnlink(path.resolve(TRACKS_DIR, t.filePath));
     if (t.coverUrl) safeUnlink(path.resolve(COVERS_DIR, t.coverUrl));
   }
+  const artist = await prisma.artist.findUnique({
+    where: { id: req.params.id },
+    include: { photos: true },
+  });
   await prisma.track.deleteMany({ where: { artistId: req.params.id } });
   await prisma.album.deleteMany({ where: { artistId: req.params.id } });
   await prisma.artist.delete({ where: { id: req.params.id } });
+  // Файлы фото подчищаем после удаления артиста: пока он в базе, проверка
+  // «на файл больше никто не ссылается» находила бы его же.
+  for (const url of [...(artist?.photos.map((p) => p.imageUrl) ?? []), artist?.imageUrl]) {
+    if (url) await unlinkPhotoIfUnused(url);
+  }
   await audit({ userId: req.userId, event: 'ARTIST_DELETED', payload: { artistId: req.params.id } });
   res.json({ success: true });
 });
@@ -230,6 +300,111 @@ router.delete('/albums/:id', requireAdmin, async (req: AuthRequest, res: Respons
   res.json({ success: true });
 });
 
+/**
+ * Состав и порядок треков альбома: `{ trackIds: [...] }`.
+ *
+ * Список целиком заменяет текущий: чего нет в массиве — выходит из альбома,
+ * что есть — входит с номерами 1..N. Так из админки можно и собрать альбом,
+ * и переставить треки одним сохранением.
+ */
+router.put('/albums/:id/tracks', requireAdmin, async (req: AuthRequest, res: Response) => {
+  if (!Array.isArray(req.body?.trackIds)) {
+    return res.status(400).json({ error: 'trackIds is required' });
+  }
+  const raw = Array.isArray(req.body.trackIds) ? req.body.trackIds : [];
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const value of raw) {
+    const id = String(value).trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+
+  const album = await prisma.album.findUnique({ where: { id: req.params.id } });
+  if (!album) return res.status(404).json({ error: 'Album not found' });
+
+  if (ids.length) {
+    const found = await prisma.track.findMany({ where: { id: { in: ids } }, select: { id: true } });
+    if (found.length !== ids.length) {
+      return res.status(400).json({ error: 'В списке есть неизвестные треки' });
+    }
+  }
+
+  const current = await prisma.track.findMany({
+    where: { albumId: album.id },
+    select: { id: true },
+  });
+  const incoming = new Set(ids);
+  const toDetach = current.map((t) => t.id).filter((id) => !incoming.has(id));
+
+  await prisma.$transaction([
+    ...toDetach.map((id) =>
+      prisma.track.update({ where: { id }, data: { albumId: null, trackNumber: null } })
+    ),
+    ...ids.map((id, index) =>
+      prisma.track.update({ where: { id }, data: { albumId: album.id, trackNumber: index + 1 } })
+    ),
+  ]);
+
+  const updated = await prisma.album.findUnique({
+    where: { id: album.id },
+    include: albumDetailInclude,
+  });
+  await audit({
+    userId: req.userId,
+    event: 'ALBUM_TRACKS_UPDATED',
+    payload: { albumId: album.id, count: ids.length },
+  });
+  res.json(serializeAlbum(updated!));
+});
+
+/**
+ * Порядок треков в альбоме: `{ trackIds: [...] }` — как их выстроили в админке.
+ *
+ * Присланные треки получают номера 1..N, остальные треки альбома уезжают за
+ * ними по дате загрузки. Так частичный список от устаревшего клиента не
+ * обнуляет порядок у всего альбома.
+ */
+router.put('/albums/:id/track-order', requireAdmin, async (req: AuthRequest, res: Response) => {
+  const ids: string[] = Array.isArray(req.body?.trackIds) ? req.body.trackIds.map(String) : [];
+  if (!ids.length) return res.status(400).json({ error: 'trackIds is required' });
+
+  const tracks = await prisma.track.findMany({
+    where: { albumId: req.params.id },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  });
+  if (!tracks.length) return res.status(404).json({ error: 'В альбоме нет треков' });
+
+  const known = new Set(tracks.map((t) => t.id));
+  const foreign = ids.filter((id) => !known.has(id));
+  if (foreign.length) {
+    return res.status(400).json({ error: 'В списке есть треки из другого альбома' });
+  }
+
+  const ordered = ids.filter((id) => known.has(id));
+  const rest = tracks.map((t) => t.id).filter((id) => !ordered.includes(id));
+
+  await prisma.$transaction(
+    [...ordered, ...rest].map((id, index) =>
+      prisma.track.update({ where: { id }, data: { trackNumber: index + 1 } })
+    )
+  );
+
+  const album = await prisma.album.findUnique({
+    where: { id: req.params.id },
+    include: albumDetailInclude,
+  });
+  if (!album) return res.status(404).json({ error: 'Album not found' });
+  await audit({
+    userId: req.userId,
+    event: 'ALBUM_TRACKS_REORDERED',
+    payload: { albumId: req.params.id, count: ordered.length },
+  });
+  res.json(serializeAlbum(album));
+});
+
 router.post('/albums/:id/cover', requireAdmin, coverUpload.single('cover'), async (req: AuthRequest, res: Response) => {
   if (!req.file) return res.status(400).json({ error: 'Обложка не получена' });
   const album = await prisma.album.findUnique({ where: { id: req.params.id } });
@@ -249,6 +424,8 @@ router.post('/albums/:id/cover', requireAdmin, coverUpload.single('cover'), asyn
   res.json(updated);
 });
 
+// Загрузка главного фото. Прежнее не удаляем, а оставляем в галерее — раньше
+// оно затиралось безвозвратно.
 router.post('/artists/:id/image', requireAdmin, coverUpload.single('image'), async (req: AuthRequest, res: Response) => {
   if (!req.file) return res.status(400).json({ error: 'Фото не получено' });
   const artist = await prisma.artist.findUnique({ where: { id: req.params.id } });
@@ -256,15 +433,119 @@ router.post('/artists/:id/image', requireAdmin, coverUpload.single('image'), asy
     safeUnlink(req.file.path);
     return res.status(404).json({ error: 'Artist not found' });
   }
-  if (artist.imageUrl) {
-    safeUnlink(path.resolve(COVERS_DIR, artist.imageUrl));
-  }
-  const updated = await prisma.artist.update({
-    where: { id: artist.id },
-    data: { imageUrl: req.file.filename },
+
+  await ensurePrimaryInGallery(artist.id, artist.imageUrl);
+  const last = await prisma.artistPhoto.findFirst({
+    where: { artistId: artist.id },
+    orderBy: { position: 'desc' },
   });
+  await prisma.artistPhoto.create({
+    data: { artistId: artist.id, imageUrl: req.file.filename, position: (last?.position ?? -1) + 1 },
+  });
+  await prisma.artist.update({ where: { id: artist.id }, data: { imageUrl: req.file.filename } });
+
   await audit({ userId: req.userId, event: 'ARTIST_UPDATED', payload: { artistId: artist.id } });
-  res.status(200).json(updated);
+  res.status(200).json(await artistWithPhotos(artist.id));
+});
+
+// Несколько фото за раз. Первое загруженное становится главным, если главного
+// ещё не было.
+router.post('/artists/:id/photos', requireAdmin, coverUpload.array('photos', 12), async (req: AuthRequest, res: Response) => {
+  const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+  if (!files.length) return res.status(400).json({ error: 'Фото не получены' });
+
+  const artist = await prisma.artist.findUnique({ where: { id: req.params.id } });
+  if (!artist) {
+    for (const file of files) safeUnlink(file.path);
+    return res.status(404).json({ error: 'Artist not found' });
+  }
+
+  await ensurePrimaryInGallery(artist.id, artist.imageUrl);
+  const last = await prisma.artistPhoto.findFirst({
+    where: { artistId: artist.id },
+    orderBy: { position: 'desc' },
+  });
+
+  let position = (last?.position ?? -1) + 1;
+  for (const file of files) {
+    await prisma.artistPhoto.create({
+      data: { artistId: artist.id, imageUrl: file.filename, position },
+    });
+    position++;
+  }
+
+  if (!artist.imageUrl) {
+    await prisma.artist.update({ where: { id: artist.id }, data: { imageUrl: files[0].filename } });
+  }
+
+  await audit({
+    userId: req.userId,
+    event: 'ARTIST_PHOTOS_ADDED',
+    payload: { artistId: artist.id, count: files.length },
+  });
+  res.status(201).json(await artistWithPhotos(artist.id));
+});
+
+// Порядок фото в галерее. Регистрируется до `/photos/:photoId`, чтобы `order`
+// не был принят за идентификатор.
+router.put('/artists/:id/photos/order', requireAdmin, async (req: AuthRequest, res: Response) => {
+  const ids: string[] = Array.isArray(req.body?.photoIds) ? req.body.photoIds.map(String) : [];
+  if (!ids.length) return res.status(400).json({ error: 'photoIds is required' });
+
+  const photos = await prisma.artistPhoto.findMany({ where: { artistId: req.params.id } });
+  const known = new Set(photos.map((p) => p.id));
+  const ordered = ids.filter((id) => known.has(id));
+  const rest = photos.filter((p) => !ordered.includes(p.id)).map((p) => p.id);
+
+  await prisma.$transaction(
+    [...ordered, ...rest].map((id, index) =>
+      prisma.artistPhoto.update({ where: { id }, data: { position: index } })
+    )
+  );
+
+  await audit({ userId: req.userId, event: 'ARTIST_UPDATED', payload: { artistId: req.params.id } });
+  res.json(await artistWithPhotos(req.params.id));
+});
+
+router.put('/artists/:id/photos/:photoId/primary', requireAdmin, async (req: AuthRequest, res: Response) => {
+  const photo = await prisma.artistPhoto.findUnique({ where: { id: req.params.photoId } });
+  if (!photo || photo.artistId !== req.params.id) {
+    return res.status(404).json({ error: 'Photo not found' });
+  }
+  await prisma.artist.update({ where: { id: photo.artistId }, data: { imageUrl: photo.imageUrl } });
+  await audit({
+    userId: req.userId,
+    event: 'ARTIST_UPDATED',
+    payload: { artistId: photo.artistId, primaryPhoto: photo.id },
+  });
+  res.json(await artistWithPhotos(photo.artistId));
+});
+
+router.delete('/artists/:id/photos/:photoId', requireAdmin, async (req: AuthRequest, res: Response) => {
+  const photo = await prisma.artistPhoto.findUnique({ where: { id: req.params.photoId } });
+  if (!photo || photo.artistId !== req.params.id) {
+    return res.status(404).json({ error: 'Photo not found' });
+  }
+
+  await prisma.artistPhoto.delete({ where: { id: photo.id } });
+
+  // Удалили главное — главным становится следующее по порядку, иначе артист
+  // остался бы с битой картинкой во всех списках.
+  const artist = await prisma.artist.findUnique({ where: { id: photo.artistId } });
+  if (artist?.imageUrl === photo.imageUrl) {
+    const next = await prisma.artistPhoto.findFirst({
+      where: { artistId: photo.artistId },
+      orderBy: { position: 'asc' },
+    });
+    await prisma.artist.update({
+      where: { id: photo.artistId },
+      data: { imageUrl: next?.imageUrl ?? null },
+    });
+  }
+
+  await unlinkPhotoIfUnused(photo.imageUrl);
+  await audit({ userId: req.userId, event: 'ARTIST_UPDATED', payload: { artistId: photo.artistId } });
+  res.json(await artistWithPhotos(photo.artistId));
 });
 
 // =====================================================================
