@@ -13,15 +13,32 @@ const PlaylistSchema = z.object({
   isPublic: z.boolean().default(false)
 });
 
+function serializePlaylist(playlist: any) {
+  return stripCryptoFields({
+    ...playlist,
+    tracks: playlist.tracks.map((pt: any) => ({
+      ...pt,
+      track: pt.track ? serializeTrack(pt.track) : pt.track,
+    })),
+  });
+}
+
+const playlistDetailInclude = {
+  tracks: {
+    include: { track: { include: trackInclude } },
+    orderBy: { position: 'asc' as const },
+  },
+};
+
 // GET /api/playlists
 router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
   const playlists = await prisma.playlist.findMany({
     where: { userId: req.userId },
-    include: { tracks: true },
-    orderBy: { createdAt: 'desc' }
+    include: playlistDetailInclude,
+    orderBy: { createdAt: 'desc' },
   });
 
-  res.json({ data: stripCryptoFields(playlists) });
+  res.json({ data: playlists.map((p) => serializePlaylist(p)) });
 });
 
 // POST /api/playlists
@@ -42,12 +59,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
 router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   const playlist = await prisma.playlist.findUnique({
     where: { id: req.params.id },
-    include: {
-      tracks: {
-        include: { track: { include: trackInclude } },
-        orderBy: { position: 'asc' }
-      }
-    }
+    include: playlistDetailInclude,
   });
 
   if (!playlist) {
@@ -58,15 +70,7 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
 
-  const serialized = {
-    ...playlist,
-    tracks: playlist.tracks.map((pt) => ({
-      ...pt,
-      track: pt.track ? serializeTrack(pt.track) : pt.track,
-    })),
-  };
-
-  res.json(stripCryptoFields(serialized));
+  res.json(serializePlaylist(playlist));
 });
 
 router.post('/:id/share', authenticate, async (req: AuthRequest, res: Response) => {
@@ -79,6 +83,40 @@ router.post('/:id/share', authenticate, async (req: AuthRequest, res: Response) 
     data: { isPublic: true },
   });
   res.json({ id: updated.id, isPublic: true });
+});
+
+/** Копия чужого публичного плейлиста в свою библиотеку. */
+router.post('/:id/save', authenticate, async (req: AuthRequest, res: Response) => {
+  const source = await prisma.playlist.findUnique({
+    where: { id: req.params.id },
+    include: { tracks: { orderBy: { position: 'asc' } } },
+  });
+  if (!source) return res.status(404).json({ error: 'Playlist not found' });
+  if (source.userId !== req.userId && !source.isPublic) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  if (source.userId === req.userId) {
+    return res.status(400).json({ error: 'Это уже твой плейлист' });
+  }
+
+  const copy = await prisma.playlist.create({
+    data: {
+      title: source.title,
+      description: source.description,
+      coverUrl: source.coverUrl,
+      isPublic: false,
+      userId: req.userId!,
+      tracks: {
+        create: source.tracks.map((row) => ({
+          trackId: row.trackId,
+          position: row.position,
+        })),
+      },
+    },
+    include: playlistDetailInclude,
+  });
+
+  res.status(201).json(serializePlaylist(copy));
 });
 
 // POST /api/playlists/:id/tracks
