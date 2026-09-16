@@ -65,6 +65,7 @@ ${PREVIEW_STYLE}
 ${coverUrl ? `<div class="bg" style="background-image:url('${escapeHtml(coverUrl)}')"></div>` : ''}
 <div class="veil"></div>
 <div class="page">
+  <div class="who">альбом</div>
   <div class="hero">
     ${coverUrl ? `<img class="cover" src="${escapeHtml(coverUrl)}" alt="">` : `<div class="cover cover--empty">♪</div>`}
     <div class="meta">
@@ -74,7 +75,7 @@ ${coverUrl ? `<div class="bg" style="background-image:url('${escapeHtml(coverUrl
     </div>
   </div>
   ${trackRows(tracks)}
-  <a class="open" href="${escapeHtml(deepLink)}">Открыть</a>
+  <a class="open" href="${escapeHtml(deepLink)}">Открыть в приложении</a>
 </div>
 ${LOCK_SCRIPT}
 </body>

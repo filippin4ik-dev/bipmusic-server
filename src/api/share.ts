@@ -48,29 +48,32 @@ const STYLE = `<style>
   * { box-sizing: border-box; scrollbar-width: none; -ms-overflow-style: none; }
   *::-webkit-scrollbar { display: none; width: 0; height: 0; }
   html, body {
-    margin: 0; height: 100%; background: #090a0f; color: #f7f8fa;
+    margin: 0; height: 100%; background: #131318; color: #f7f7f8;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     overflow: hidden; overscroll-behavior: none; touch-action: manipulation;
     -webkit-text-size-adjust: 100%;
   }
-  body { display: grid; place-items: center; padding: 24px; text-align: center; }
-  .card { width: 100%; max-width: 360px; }
+  body { display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; }
+  .card { width: 100%; max-width: 340px; }
   .cover {
-    width: min(72vw, 260px); height: min(72vw, 260px); margin: 0 auto 20px; border-radius: 12px;
-    object-fit: cover; display: block; background: #17181f;
+    width: 240px; height: 240px; margin: 0 auto 24px; border-radius: 16px;
+    object-fit: cover; display: block; background: #23232b;
+    box-shadow: 0 18px 40px rgba(0,0,0,.45);
   }
-  .cover--empty { display: grid; place-items: center; font-size: 56px; }
+  .cover--empty { display: flex; align-items: center; justify-content: center; font-size: 64px; }
   h1 { margin: 0 0 6px; font-size: 22px; line-height: 1.25; }
   .artist { margin: 0 0 4px; font-size: 15px; color: #a1a1ac; }
   .album { margin: 0; font-size: 13px; color: #6f6f7a; }
   .open {
-    display: block; margin: 24px 0 0; padding: 14px 20px; border-radius: 12px;
+    display: block; margin: 28px 0 0; padding: 15px 20px; border-radius: 12px;
     background: #34d399; color: #10231c; font-size: 16px; font-weight: 600;
     text-decoration: none;
   }
   @media (min-width: 800px) {
     .cover { width: 280px; height: 280px; }
-    h1 { font-size: 26px; }
+  }
+  @media (max-width: 420px) {
+    .cover { width: min(72vw, 240px); height: min(72vw, 240px); }
   }
 </style>`;
 
@@ -134,9 +137,10 @@ ${STYLE}
   <h1>${escapeHtml(title)}</h1>
   <p class="artist">${escapeHtml(artist)}</p>
   ${album ? `<p class="album">${escapeHtml(album)}</p>` : ''}
-  <a class="open" href="${escapeHtml(deepLink)}">Открыть</a>
-</div></body>
-<script>addEventListener('gesturestart',function(e){e.preventDefault()});addEventListener('gesturechange',function(e){e.preventDefault()});</script>`,
+  <a class="open" href="${escapeHtml(deepLink)}">Открыть в приложении</a>
+</div>
+<script>addEventListener('gesturestart',function(e){e.preventDefault()});addEventListener('gesturechange',function(e){e.preventDefault()});</script>
+</body>`,
     })
   );
 });

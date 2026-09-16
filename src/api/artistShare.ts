@@ -29,24 +29,26 @@ const STYLE = `<style>
     overflow: hidden; overscroll-behavior: none; touch-action: manipulation;
     -webkit-text-size-adjust: 100%;
   }
-  body { display: grid; place-items: center; padding: 24px; }
-  .bg { position: fixed; inset: 0; background-size: cover; background-position: center; filter: blur(48px) saturate(.65); opacity: .35; pointer-events: none; }
+  body { display: flex; align-items: center; justify-content: center; padding: 28px 20px; text-align: center; }
+  .bg { position: fixed; inset: 0; background-size: cover; background-position: center; filter: blur(36px) saturate(1.15); opacity: .45; pointer-events: none; }
   .veil { position: fixed; inset: 0; background: linear-gradient(180deg, rgba(9,10,15,.3), #090a0f 75%); pointer-events: none; }
-  .card { position: relative; z-index: 1; width: 100%; max-width: 360px; text-align: center; }
+  .card { position: relative; z-index: 1; width: 100%; max-width: 340px; }
+  .who { font-size: 11px; letter-spacing: 1.8px; text-transform: uppercase; color: #9ea4b0; font-weight: 600; }
   .portrait {
-    width: 160px; height: 160px; margin: 0 auto 18px; border-radius: 50%;
+    width: 168px; height: 168px; margin: 18px auto 20px; border-radius: 50%;
     object-fit: cover; display: block; background: #17181f;
+    border: 0; outline: none; box-shadow: none;
   }
-  .portrait--empty { display: grid; place-items: center; font-size: 56px; }
-  h1 { margin: 0 0 8px; font-size: 26px; line-height: 1.15; letter-spacing: -.3px; }
+  .portrait--empty { display: grid; place-items: center; font-size: 64px; }
+  h1 { margin: 0 0 8px; font-size: 28px; line-height: 1.15; letter-spacing: -.4px; }
   .bio { margin: 0 auto; max-width: 36ch; font-size: 14px; color: #9ea4b0; }
   .open {
-    display: block; margin: 24px 0 0; padding: 14px 20px; border-radius: 12px;
+    display: block; margin: 28px 0 0; padding: 15px 20px; border-radius: 999px;
     background: #34d399; color: #10231c; font-size: 16px; font-weight: 600;
     text-decoration: none;
   }
   @media (min-width: 800px) {
-    .portrait { width: 200px; height: 200px; }
+    .portrait { width: 196px; height: 196px; }
     h1 { font-size: 32px; }
   }
 </style>`;
@@ -90,10 +92,11 @@ ${STYLE}
 ${coverUrl ? `<div class="bg" style="background-image:url('${escapeHtml(coverUrl)}')"></div>` : ''}
 <div class="veil"></div>
 <div class="card">
+  <div class="who">артист</div>
   ${coverUrl ? `<img class="portrait" src="${escapeHtml(coverUrl)}" alt="">` : `<div class="portrait portrait--empty">♪</div>`}
   <h1>${escapeHtml(artist.name)}</h1>
   ${bio ? `<p class="bio">${escapeHtml(bio)}</p>` : ''}
-  <a class="open" href="${escapeHtml(deepLink)}">Открыть</a>
+  <a class="open" href="${escapeHtml(deepLink)}">Открыть в приложении</a>
 </div>
 <script>addEventListener('gesturestart',function(e){e.preventDefault()});addEventListener('gesturechange',function(e){e.preventDefault()});</script>
 </body>
