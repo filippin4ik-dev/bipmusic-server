@@ -466,7 +466,7 @@ router.get('/', async (req: Request, res: Response) => {
 <meta property="og:description" content="${escapeHtml(description)}">
 <meta property="og:url" content="${escapeHtml(origin)}">
 ${ogImage ? `<meta property="og:image" content="${escapeHtml(ogImage)}">\n<meta name="twitter:card" content="summary_large_image">` : '<meta name="twitter:card" content="summary">'}
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎵</text></svg>">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%2310B981'/%3E%3Cellipse cx='12.4' cy='23' rx='4.6' ry='3.3' fill='%230F121C' transform='rotate(-20 12.4 23)'/%3E%3Crect x='16.3' y='7' width='2.3' height='15.2' rx='.6' fill='%230F121C'/%3E%3Cpath d='M18.6 7c4.4 1.6 6.4 4.6 5.6 7.2-2.4-2.2-4.4-3.4-5.6-4z' fill='%230F121C'/%3E%3C/svg%3E">
 ${STYLE}
 </head>
 <body>
