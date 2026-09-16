@@ -20,8 +20,11 @@ import adminRoutes from './api/admin.js';
 import shareRoutes from './api/share.js';
 import landingRoutes from './api/landing.js';
 import artistShareRoutes from './api/artistShare.js';
+import albumShareRoutes from './api/albumShare.js';
+import playlistShareRoutes from './api/playlistShare.js';
 import appRoutes from './api/app.js';
 import { appDir } from './services/appRelease.js';
+import { requireFreshApp } from './middleware/appVersion.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/logger.js';
 import { globalLimiter } from './middleware/rateLimits.js';
@@ -113,6 +116,8 @@ app.use('/files/covers', express.static(COVERS_DIR, { maxAge: '7d' }));
 // Публичные страницы для ссылок «поделиться» из приложения.
 app.use('/t', shareRoutes);
 app.use('/a', artistShareRoutes);
+app.use('/album', albumShareRoutes);
+app.use('/playlist', playlistShareRoutes);
 
 // IPA последней сборки (для itms-services, если Diawi не задан).
 app.use('/files/app', express.static(APP_DIR, { maxAge: '1h' }));
@@ -120,6 +125,8 @@ app.use('/files/app', express.static(APP_DIR, { maxAge: '1h' }));
 // Главная страница домена. Весь bipmusic.ru проксируется сюда, поэтому без неё
 // на корне отдавался JSON «Route not found».
 app.use('/', landingRoutes);
+
+app.use(requireFreshApp);
 
 // API Routes
 app.use('/api/auth', authRoutes);

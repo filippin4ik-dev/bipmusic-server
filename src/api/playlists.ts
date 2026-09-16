@@ -69,6 +69,18 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   res.json(stripCryptoFields(serialized));
 });
 
+router.post('/:id/share', authenticate, async (req: AuthRequest, res: Response) => {
+  const playlist = await prisma.playlist.findUnique({ where: { id: req.params.id } });
+  if (!playlist || playlist.userId !== req.userId) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const updated = await prisma.playlist.update({
+    where: { id: playlist.id },
+    data: { isPublic: true },
+  });
+  res.json({ id: updated.id, isPublic: true });
+});
+
 // POST /api/playlists/:id/tracks
 router.post('/:id/tracks', authenticate, async (req: AuthRequest, res: Response) => {
   const { trackId } = req.body;
