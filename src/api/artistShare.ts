@@ -21,31 +21,34 @@ function publicOrigin(req: Request): string {
 
 const STYLE = `<style>
   :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
-    padding: 28px 20px; background: #090a0f; color: #f7f8fa;
+  * { box-sizing: border-box; scrollbar-width: none; -ms-overflow-style: none; }
+  *::-webkit-scrollbar { display: none; width: 0; height: 0; }
+  html, body {
+    margin: 0; height: 100%; background: #090a0f; color: #f7f8fa;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    text-align: center; position: relative; overflow: hidden;
+    overflow: hidden; overscroll-behavior: none; touch-action: manipulation;
+    -webkit-text-size-adjust: 100%;
   }
-  .bg { position: absolute; inset: -40px; background-size: cover; background-position: center; filter: blur(36px) saturate(1.15); transform: scale(1.15); opacity: .45; }
-  .veil { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(9,10,15,.3), #090a0f 75%); }
-  .card { position: relative; z-index: 1; width: 100%; max-width: 340px; }
-  .who { font-size: 11px; letter-spacing: 1.8px; text-transform: uppercase; color: #9ea4b0; font-weight: 600; }
+  body { display: grid; place-items: center; padding: 24px; }
+  .bg { position: fixed; inset: 0; background-size: cover; background-position: center; filter: blur(48px) saturate(.65); opacity: .35; pointer-events: none; }
+  .veil { position: fixed; inset: 0; background: linear-gradient(180deg, rgba(9,10,15,.3), #090a0f 75%); pointer-events: none; }
+  .card { position: relative; z-index: 1; width: 100%; max-width: 360px; text-align: center; }
   .portrait {
-    width: 168px; height: 168px; margin: 18px auto 20px; border-radius: 50%;
+    width: 160px; height: 160px; margin: 0 auto 18px; border-radius: 50%;
     object-fit: cover; display: block; background: #17181f;
-    border: 0; outline: none; box-shadow: none;
   }
-  .portrait--empty { display: grid; place-items: center; font-size: 64px; }
-  h1 { margin: 0 0 8px; font-size: 28px; line-height: 1.15; letter-spacing: -.4px; }
+  .portrait--empty { display: grid; place-items: center; font-size: 56px; }
+  h1 { margin: 0 0 8px; font-size: 26px; line-height: 1.15; letter-spacing: -.3px; }
   .bio { margin: 0 auto; max-width: 36ch; font-size: 14px; color: #9ea4b0; }
   .open {
-    display: block; margin: 28px 0 0; padding: 15px 20px; border-radius: 999px;
+    display: block; margin: 24px 0 0; padding: 14px 20px; border-radius: 12px;
     background: #34d399; color: #10231c; font-size: 16px; font-weight: 600;
     text-decoration: none;
   }
-  .hint { margin: 14px 0 0; font-size: 12px; color: #6f6f7a; line-height: 1.5; }
+  @media (min-width: 800px) {
+    .portrait { width: 200px; height: 200px; }
+    h1 { font-size: 32px; }
+  }
 </style>`;
 
 router.get('/:artistId', async (req: Request, res: Response) => {
@@ -71,7 +74,7 @@ router.get('/:artistId', async (req: Request, res: Response) => {
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>${escapeHtml(artist.name)} — bipMusic</title>
 <meta property="og:type" content="profile">
 <meta property="og:site_name" content="bipMusic">
@@ -87,13 +90,12 @@ ${STYLE}
 ${coverUrl ? `<div class="bg" style="background-image:url('${escapeHtml(coverUrl)}')"></div>` : ''}
 <div class="veil"></div>
 <div class="card">
-  <div class="who">артист</div>
   ${coverUrl ? `<img class="portrait" src="${escapeHtml(coverUrl)}" alt="">` : `<div class="portrait portrait--empty">♪</div>`}
   <h1>${escapeHtml(artist.name)}</h1>
   ${bio ? `<p class="bio">${escapeHtml(bio)}</p>` : ''}
-  <a class="open" href="${escapeHtml(deepLink)}">Открыть в приложении</a>
-  <p class="hint">Кнопка работает, если на устройстве установлен bipMusic.</p>
+  <a class="open" href="${escapeHtml(deepLink)}">Открыть</a>
 </div>
+<script>addEventListener('gesturestart',function(e){e.preventDefault()});addEventListener('gesturechange',function(e){e.preventDefault()});</script>
 </body>
 </html>`);
 });

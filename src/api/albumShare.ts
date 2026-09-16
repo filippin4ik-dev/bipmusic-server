@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import { prisma } from '../db.js';
-import { APP_SCHEME, PREVIEW_STYLE, escapeHtml, publicOrigin, trackRows } from './sharePreview.js';
+import { APP_SCHEME, PREVIEW_STYLE, VIEWPORT, LOCK_SCRIPT, escapeHtml, publicOrigin, trackRows } from './sharePreview.js';
 
 const router = express.Router();
 
@@ -15,7 +15,7 @@ router.get('/:albumId', async (req: Request, res: Response) => {
 
   res.type('html');
   if (!album) {
-    res.status(404).send(`<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>Альбом не найден</title>${PREVIEW_STYLE}</head><body><div class="page"><h1>Альбом не найден</h1></div></body></html>`);
+    res.status(404).send(`<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="${VIEWPORT}"><title>Альбом не найден</title>${PREVIEW_STYLE}</head><body><div class="page"><h1>Альбом не найден</h1></div></body></html>`);
     return;
   }
 
@@ -49,7 +49,7 @@ router.get('/:albumId', async (req: Request, res: Response) => {
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="${VIEWPORT}">
 <title>${escapeHtml(album.title)} — ${escapeHtml(artistName || 'bipMusic')}</title>
 <meta property="og:type" content="music.album">
 <meta property="og:site_name" content="bipMusic">
@@ -65,7 +65,6 @@ ${PREVIEW_STYLE}
 ${coverUrl ? `<div class="bg" style="background-image:url('${escapeHtml(coverUrl)}')"></div>` : ''}
 <div class="veil"></div>
 <div class="page">
-  <div class="who">альбом</div>
   <div class="hero">
     ${coverUrl ? `<img class="cover" src="${escapeHtml(coverUrl)}" alt="">` : `<div class="cover cover--empty">♪</div>`}
     <div class="meta">
@@ -74,10 +73,10 @@ ${coverUrl ? `<div class="bg" style="background-image:url('${escapeHtml(coverUrl
       <p class="stats">${escapeHtml(stats)}</p>
     </div>
   </div>
-  ${trackRows(tracks, 'Слушать альбом')}
-  <a class="open" href="${escapeHtml(deepLink)}">Открыть в приложении</a>
-  <p class="hint">Список здесь только для просмотра. Слушать — в приложении.</p>
+  ${trackRows(tracks)}
+  <a class="open" href="${escapeHtml(deepLink)}">Открыть</a>
 </div>
+${LOCK_SCRIPT}
 </body>
 </html>`);
 });
