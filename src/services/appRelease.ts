@@ -23,12 +23,63 @@ export function appDir(): string {
   return APP_DIR;
 }
 
+export function ipaPath(filename: string): string {
+  return path.join(appDir(), filename);
+}
+
+/** IPA на диске есть — Diawi из JSON больше не считается. */
+export function hostedIpaFilename(release: Pick<AppRelease, 'ipaFilename'> | null): string | null {
+  const named = release?.ipaFilename?.trim();
+  if (named) {
+    try {
+      if (fs.existsSync(ipaPath(named))) return named;
+    } catch {
+      // ignore
+    }
+  }
+  try {
+    const files = fs
+      .readdirSync(appDir())
+      .filter((file) => file.toLowerCase().endsWith('.ipa') && !file.startsWith('upload-'));
+    if (!files.length) return null;
+    files.sort((a, b) => fs.statSync(ipaPath(b)).mtimeMs - fs.statSync(ipaPath(a)).mtimeMs);
+    return files[0];
+  } catch {
+    return null;
+  }
+}
+
+/** Каноническая страница установки. Новый путь — Safari не держит на нём старый 303 на Diawi. */
+export function installPageUrl(release: AppRelease, origin: string): string {
+  const stamp = Date.parse(release.publishedAt) || Date.now();
+  return `${origin}/install?v=${encodeURIComponent(release.version)}&b=${release.build || 0}&t=${stamp}`;
+}
+
+function sanitizeRelease(release: AppRelease): AppRelease {
+  const ipaOnDisk = hostedIpaFilename(release);
+  const ipaName = ipaOnDisk || release.ipaFilename?.trim() || null;
+  return {
+    ...release,
+    ipaFilename: ipaName,
+    // Diawi выкидываем только когда файл реально лежит на диске.
+    diawiUrl: ipaOnDisk ? null : (release.diawiUrl?.trim() || null),
+  };
+}
+
 export function readRelease(): AppRelease | null {
   try {
     const raw = fs.readFileSync(META_PATH, 'utf8');
     const parsed = JSON.parse(raw) as AppRelease;
     if (!parsed?.version) return null;
-    return parsed;
+    const clean = sanitizeRelease(parsed);
+    if (clean.diawiUrl !== (parsed.diawiUrl || null) || clean.ipaFilename !== (parsed.ipaFilename || null)) {
+      try {
+        fs.writeFileSync(META_PATH, JSON.stringify(clean, null, 2));
+      } catch {
+        // ignore
+      }
+    }
+    return clean;
   } catch {
     return null;
   }
@@ -36,21 +87,25 @@ export function readRelease(): AppRelease | null {
 
 export function writeRelease(release: AppRelease): void {
   appDir();
-  fs.writeFileSync(META_PATH, JSON.stringify(release, null, 2));
-}
-
-export function ipaPath(filename: string): string {
-  return path.join(appDir(), filename);
+  const ipa = release.ipaFilename?.trim() || null;
+  const clean: AppRelease = {
+    ...release,
+    ipaFilename: ipa,
+    diawiUrl: ipa ? null : (release.diawiUrl?.trim() || null),
+  };
+  fs.writeFileSync(META_PATH, JSON.stringify(clean, null, 2));
 }
 
 export function publicRelease(release: AppRelease, origin: string) {
-  const installUrl = release.diawiUrl || `${origin}/app`;
+  // Ссылку всегда отдаём на свою страницу /install, никогда на Diawi:
+  // Safari кэширует 303, и после загрузки IPA всё равно открывается старый билд.
+  const ipa = hostedIpaFilename(release);
   return {
     version: release.version,
     build: release.build,
     notes: release.notes,
-    url: installUrl,
-    diawiUrl: release.diawiUrl,
+    url: installPageUrl(release, origin),
+    diawiUrl: ipa ? null : release.diawiUrl,
     publishedAt: release.publishedAt,
   };
 }

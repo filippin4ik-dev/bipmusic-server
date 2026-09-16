@@ -23,9 +23,9 @@ import {
 } from '../utils/trackSerialize.js';
 import {
   appDir,
+  hostedIpaFilename,
   publicRelease,
   readRelease,
-  uploadToDiawi,
   writeRelease,
   type AppRelease,
 } from '../services/appRelease.js';
@@ -743,14 +743,10 @@ router.put('/tracks/:id', requireAdmin, async (req: AuthRequest, res: Response) 
 const ipaUpload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, appDir()),
-    filename: (_req, _file, cb) => cb(null, 'bipmusic.ipa'),
+    filename: (_req, _file, cb) => cb(null, `upload-${Date.now()}.ipa`),
   }),
-  limits: { fileSize: 350 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    const ok = ext === '.ipa' || file.mimetype === 'application/octet-stream';
-    cb(null, ok);
-  },
+  limits: { fileSize: 500 * 1024 * 1024 },
+  fileFilter: (_req, _file, cb) => cb(null, true),
 });
 
 function originOf(req: AuthRequest): string {
@@ -763,7 +759,10 @@ router.get('/app/release', requireAdmin, (_req: AuthRequest, res: Response) => {
   const release = readRelease();
   if (!release) return res.json({ data: null, diawiConfigured: Boolean(process.env.DIAWI_TOKEN?.trim()) });
   res.json({
-    data: { ...publicRelease(release, originOf(_req)), ipaFilename: release.ipaFilename },
+    data: {
+      ...publicRelease(release, originOf(_req)),
+      ipaFilename: hostedIpaFilename(release) || release.ipaFilename,
+    },
     diawiConfigured: Boolean(process.env.DIAWI_TOKEN?.trim()),
   });
 });
@@ -783,16 +782,39 @@ router.post(
     }
 
     const previous = readRelease();
-    let diawiUrl = pastedDiawi || previous?.diawiUrl || null;
-    let ipaFilename = req.file ? req.file.filename : previous?.ipaFilename || null;
+    const claimedIpa = String(req.body?.hasIpa || '') === '1';
+    const dropDiawi = claimedIpa || String(req.body?.clearDiawi || '') === '1';
+    const newIpa = Boolean(req.file);
+    if (claimedIpa && !req.file) {
+      return res.status(400).json({ error: 'IPA не дошёл до сервера. Выбери файл ещё раз.' });
+    }
+    let diawiUrl: string | null = null;
+    let ipaFilename = previous?.ipaFilename || null;
     let diawiError: string | null = null;
 
-    if (req.file && process.env.DIAWI_TOKEN?.trim()) {
+    if (newIpa && req.file) {
+      // Новый файл = новая сборка. Старую ссылку Diawi выкидываем всегда:
+      // она ведёт на прошлый IPA, а /app из-за неё открывал Diawi вместо файла.
+      diawiUrl = null;
+      const safeVer = version.replace(/[^a-zA-Z0-9._-]+/g, '-') || 'build';
+      const nextName = `bipmusic-${safeVer}-${build || Date.now()}.ipa`;
+      const dest = path.join(appDir(), nextName);
       try {
-        diawiUrl = await uploadToDiawi(req.file.path);
+        if (req.file.path !== dest) fs.renameSync(req.file.path, dest);
+        if (previous?.ipaFilename && previous.ipaFilename !== nextName) {
+          safeUnlink(path.join(appDir(), previous.ipaFilename));
+        }
+        if (nextName !== 'bipmusic.ipa') safeUnlink(path.join(appDir(), 'bipmusic.ipa'));
+        ipaFilename = nextName;
       } catch (err) {
-        diawiError = err instanceof Error ? err.message : String(err);
+        if (req.file) safeUnlink(req.file.path);
+        return res.status(500).json({ error: err instanceof Error ? err.message : 'Не удалось сохранить IPA' });
       }
+    } else if (dropDiawi) {
+      diawiUrl = null;
+    } else {
+      // Без нового файла: если IPA уже лежит, старый Diawi не оставляем.
+      diawiUrl = pastedDiawi || (ipaFilename ? null : previous?.diawiUrl) || null;
     }
 
     if (!diawiUrl && !ipaFilename) {
@@ -808,13 +830,20 @@ router.post(
       publishedAt: new Date().toISOString(),
     };
     writeRelease(release);
+    const saved = readRelease() || release;
+    if (newIpa && !hostedIpaFilename(saved)) {
+      return res.status(500).json({ error: 'IPA не оказался на диске. Залей файл ещё раз.' });
+    }
     await audit({
       userId: req.userId,
       event: 'APP_RELEASE_PUBLISHED',
-      payload: { version, build, diawiUrl, ipaFilename, diawiError },
+      payload: { version, build, diawiUrl: saved.diawiUrl, ipaFilename: saved.ipaFilename, diawiError },
     });
     res.json({
-      data: { ...publicRelease(release, originOf(req)), ipaFilename },
+      data: {
+        ...publicRelease(saved, originOf(req)),
+        ipaFilename: hostedIpaFilename(saved) || saved.ipaFilename,
+      },
       diawiError,
     });
   }

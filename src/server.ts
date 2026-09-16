@@ -119,8 +119,16 @@ app.use('/a', artistShareRoutes);
 app.use('/album', albumShareRoutes);
 app.use('/playlist', playlistShareRoutes);
 
-// IPA последней сборки (для itms-services, если Diawi не задан).
-app.use('/files/app', express.static(APP_DIR, { maxAge: '1h' }));
+// IPA последней сборки для itms-services. Без кеша — иначе после новой
+// загрузки ещё час отдавался старый файл.
+app.use('/files/app', express.static(APP_DIR, {
+  etag: false,
+  lastModified: false,
+  setHeaders(res) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+  },
+}));
 
 // Главная страница домена. Весь bipmusic.ru проксируется сюда, поэтому без неё
 // на корне отдавался JSON «Route not found».

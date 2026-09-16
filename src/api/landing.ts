@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import { prisma } from '../db.js';
-import { publicRelease, readRelease } from '../services/appRelease.js';
+import { hostedIpaFilename, publicRelease, readRelease, type AppRelease } from '../services/appRelease.js';
 
 /**
  * Главная страница bipmusic.ru.
@@ -466,7 +466,7 @@ router.get('/', async (req: Request, res: Response) => {
 <meta property="og:description" content="${escapeHtml(description)}">
 <meta property="og:url" content="${escapeHtml(origin)}">
 ${ogImage ? `<meta property="og:image" content="${escapeHtml(ogImage)}">\n<meta name="twitter:card" content="summary_large_image">` : '<meta name="twitter:card" content="summary">'}
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%2310B981'/%3E%3Cellipse cx='12.4' cy='23' rx='4.6' ry='3.3' fill='%230F121C' transform='rotate(-20 12.4 23)'/%3E%3Crect x='16.3' y='7' width='2.3' height='15.2' rx='.6' fill='%230F121C'/%3E%3Cpath d='M18.6 7c4.4 1.6 6.4 4.6 5.6 7.2-2.4-2.2-4.4-3.4-5.6-4z' fill='%230F121C'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%2334d399'/%3E%3Cstop offset='1' stop-color='%236aa9f0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='10' fill='url(%23g)'/%3E%3Ctext x='16' y='23' text-anchor='middle' font-size='18' font-family='-apple-system,BlinkMacSystemFont,sans-serif' fill='%2310231c'%3E%E2%99%AA%3C/text%3E%3C/svg%3E">
 ${STYLE}
 </head>
 <body>
@@ -552,47 +552,69 @@ addEventListener('gesturechange',function(e){e.preventDefault()});
 </html>`;
 
   res.type('html');
-  // Цифры каталога живые, но меняются редко — минута кеша снимает нагрузку с
-  // базы, если по домену пройдётся бот.
-  res.set('Cache-Control', 'public, max-age=60');
+  // Кнопка «Установить» не должна жить в Safari со старым Diawi.
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.set('Pragma', 'no-cache');
   res.send(html);
 });
 
-/** Страница установки. Diawi надо открывать в Safari — редиректим туда, если ссылка есть. */
-router.get('/app', (req: Request, res: Response) => {
+function noStoreInstall(res: Response): void {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  res.set('Surrogate-Control', 'no-store');
+}
+
+function sendInstallPage(req: Request, res: Response): void {
   const release = readRelease();
+  noStoreInstall(res);
   if (!release) {
     res.status(404).type('html').send('<!DOCTYPE html><html lang="ru"><meta charset="utf-8"><title>Нет сборки</title><body style="background:#090a0f;color:#f7f8fa;font-family:sans-serif;padding:40px">Сборку ещё не выложили.</body></html>');
     return;
   }
-  if (release.diawiUrl) {
-    res.redirect(302, release.diawiUrl);
-    return;
-  }
   const origin = publicOrigin(req);
-  const manifest = `${origin}/api/app/manifest.plist`;
-  const itms = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifest)}`;
-  res.type('html').send(`<!DOCTYPE html>
+  const ipa = hostedIpaFilename(release);
+  const href = ipa
+    ? `itms-services://?action=download-manifest&url=${encodeURIComponent(`${origin}/api/app/manifest.plist`)}`
+    : (release.diawiUrl || '');
+  const hint = ipa
+    ? 'Открой эту страницу в Safari и нажми кнопку. Другие браузеры установку не запускают.'
+    : 'Сборки на сервере нет — установка идёт через Diawi. Открой ссылку в Safari.';
+  res.type('html').send(installPageHtml(release, href, hint));
+}
+
+function installPageHtml(release: AppRelease, href: string, hint: string): string {
+  const button = href
+    ? `<a href="${escapeHtml(href)}">Установить</a>`
+    : '<p>Сборку ещё не выложили.</p>';
+  return `<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-store">
 <title>Установить bipMusic ${escapeHtml(release.version)}</title>
 <meta name="theme-color" content="#090a0f">
 <style>
   body { margin:0; min-height:100vh; display:grid; place-items:center; background:#090a0f; color:#f7f8fa; font-family:-apple-system,BlinkMacSystemFont,sans-serif; text-align:center; padding:32px; }
   a { display:inline-block; margin-top:24px; padding:14px 28px; border-radius:999px; background:#34d399; color:#10231c; font-weight:700; text-decoration:none; }
-  p { color:#9ea4b0; max-width:36ch; }
+  p { color:#9ea4b0; max-width:36ch; margin:12px auto 0; }
 </style>
 </head>
 <body>
   <div>
     <h1>bipMusic ${escapeHtml(release.version)}</h1>
-    <p>Открой эту страницу в Safari и нажми кнопку. Другие браузеры установку не запускают.</p>
-    <a href="${escapeHtml(itms)}">Установить</a>
+    <p>${escapeHtml(hint)}</p>
+    ${button}
   </div>
 </body>
-</html>`);
-});
+</html>`;
+}
+
+/** Старый путь. Редиректа на Diawi больше нет — Safari кэшировал 303 и открывал прошлый билд. */
+router.get('/app', sendInstallPage);
+
+/** Новая страница установки: Safari на ней ещё не держал редирект. */
+router.get('/install', sendInstallPage);
 
 export default router;
