@@ -22,6 +22,7 @@ router.get('/manifest.plist', (req: Request, res: Response) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.set('Pragma', 'no-cache');
   const release = readRelease();
+  if (!release) return res.status(404).type('text').send('No IPA');
   const ipaFilename = hostedIpaFilename(release);
   if (!ipaFilename) return res.status(404).type('text').send('No IPA');
   const xml = otaManifest({
