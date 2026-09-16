@@ -18,6 +18,7 @@ import likesRoutes from './api/likes.js';
 import statsRoutes from './api/stats.js';
 import adminRoutes from './api/admin.js';
 import shareRoutes from './api/share.js';
+import landingRoutes from './api/landing.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/logger.js';
 import { globalLimiter } from './middleware/rateLimits.js';
@@ -108,6 +109,10 @@ app.use('/files/covers', express.static(COVERS_DIR, { maxAge: '7d' }));
 // Публичная страница трека для ссылок «поделиться» из приложения.
 // Отдаёт только название, артиста и обложку — под общим лимитом на IP.
 app.use('/t', shareRoutes);
+
+// Главная страница домена. Весь bipmusic.ru проксируется сюда, поэтому без неё
+// на корне отдавался JSON «Route not found».
+app.use('/', landingRoutes);
 
 // API Routes
 app.use('/api/auth', authRoutes);

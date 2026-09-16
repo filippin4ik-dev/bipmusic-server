@@ -54,6 +54,7 @@ router.get('/:id', optional, async (req, res) => {
     where: { id: artistId },
     include: {
       albums: { include: albumInclude },
+      photos: { orderBy: { position: 'asc' } },
     },
   });
 
@@ -105,10 +106,19 @@ router.get('/:id', optional, async (req, res) => {
   const featOnlyAlbums = featAlbums.filter((a) => !primaryAlbumIds.has(a.id));
   const albums = [...artist.albums, ...featOnlyAlbums];
 
+  // Цифры для шапки карточки. Считаем по уже загруженным трекам, чтобы не
+  // ходить в базу ещё раз.
+  const stats = {
+    trackCount: tracks.length,
+    albumCount: albums.length,
+    totalPlays: tracks.reduce((sum, t) => sum + (t.playCount ?? 0), 0),
+  };
+
   res.json({
     ...artist,
     albums: albums.map(serializeAlbum),
     tracks: serializeTracks(tracks),
+    stats,
   });
 });
 

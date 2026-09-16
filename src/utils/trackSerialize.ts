@@ -94,10 +94,33 @@ export function serializeTrack<T extends TrackRow>(track: T): Record<string, unk
   }) as Record<string, unknown>;
 }
 
+/**
+ * Порядок треков в альбоме — тот, что выставил админ.
+ *
+ * Сортируем в коде, а не запросом: у треков без номера (синглы, всё
+ * загруженное до появления порядка) `trackNumber` пустой, а SQLite ставит
+ * NULL в начало при `ORDER BY ... ASC` — такие треки прыгали бы перед
+ * размеченными. Здесь они уезжают в конец по дате загрузки.
+ */
+function sortAlbumTracks(tracks: TrackRow[]): TrackRow[] {
+  const uploadedAt = (row: TrackRow) => {
+    const value = row.createdAt;
+    if (value instanceof Date) return value.getTime();
+    const parsed = Date.parse(String(value ?? ''));
+    return Number.isNaN(parsed) ? 0 : parsed;
+  };
+  return [...tracks].sort((a, b) => {
+    const left = typeof a.trackNumber === 'number' ? a.trackNumber : Number.MAX_SAFE_INTEGER;
+    const right = typeof b.trackNumber === 'number' ? b.trackNumber : Number.MAX_SAFE_INTEGER;
+    if (left !== right) return left - right;
+    return uploadedAt(a) - uploadedAt(b);
+  });
+}
+
 export function serializeAlbum<T extends AlbumRow>(album: T): Record<string, unknown> {
   const featuredArtists = featArtists(album.albumArtists);
   const { albumArtists, tracks, ...rest } = album;
-  const serializedTracks = tracks?.map((t) => serializeTrack(t));
+  const serializedTracks = tracks && sortAlbumTracks(tracks).map((t) => serializeTrack(t));
   return stripCryptoFields({
     ...rest,
     ...(serializedTracks ? { tracks: serializedTracks } : {}),

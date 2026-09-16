@@ -41,13 +41,17 @@ model Profile {
 }
 
 model Artist {
-  id       String @id @default(uuid())
-  name     String
-  bio      String?
+  id   String  @id @default(uuid())
+  name String
+  bio  String?
+
+  /// Главное фото. Дублируется в ArtistPhoto, но остаётся здесь: по нему
+  /// рисуются все списки и старые клиенты, которые про галерею не знают.
   imageUrl String?
 
   albums       Album[]
   tracks       Track[]
+  photos       ArtistPhoto[]
   trackCredits TrackArtist[]
   albumCredits AlbumArtist[]
 
@@ -55,6 +59,22 @@ model Artist {
   updatedAt DateTime @updatedAt
 
   @@index([name])
+}
+
+/// Галерея артиста. Файлы лежат там же, где обложки, и отдаются статикой.
+model ArtistPhoto {
+  id       String @id @default(uuid())
+  artistId String
+  artist   Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  /// Имя файла в каталоге обложек — как coverUrl у альбома.
+  imageUrl String
+  position Int    @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@unique([artistId, imageUrl])
+  @@index([artistId, position])
 }
 
 model Album {
@@ -83,6 +103,10 @@ model Track {
   filePath  String @unique
   coverUrl  String?
   playCount Int    @default(0)
+
+  /// Номер в альбоме. Пустой у синглов и у всего, что загрузили до появления
+  /// порядка, — такие треки уезжают в конец списка по дате загрузки.
+  trackNumber Int?
 
   // Текст песни. Обычный текст либо LRC с метками времени («[01:23.45] строка») —
   // формат распознаёт клиент, поэтому админу не нужно выбирать вид заранее.
