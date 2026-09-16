@@ -9,7 +9,7 @@ export interface AuthTokens {
   refreshToken: string;
 }
 
-const REFRESH_TTL_MS = parseRefreshTtl(process.env.JWT_REFRESH_EXPIRY || '30d');
+const REFRESH_TTL_MS = parseRefreshTtl(process.env.JWT_REFRESH_EXPIRY || '180d');
 
 /** SQLite + bcrypt on small VPS: allow tuning via env (default 11). Clamped to 10–12 for production sanity. */
 function bcryptSaltRounds(): number {
@@ -109,8 +109,8 @@ async function generateAndPersist(userId: string, role: string, ip?: string): Pr
 }
 
 export function generateTokens(userId: string, role: string): AuthTokens {
-  const accessOpts: SignOptions = { expiresIn: (process.env.JWT_EXPIRY || '24h') as SignOptions['expiresIn'] };
-  const refreshOpts: SignOptions = { expiresIn: (process.env.JWT_REFRESH_EXPIRY || '30d') as SignOptions['expiresIn'] };
+  const accessOpts: SignOptions = { expiresIn: (process.env.JWT_EXPIRY || '30d') as SignOptions['expiresIn'] };
+  const refreshOpts: SignOptions = { expiresIn: (process.env.JWT_REFRESH_EXPIRY || '180d') as SignOptions['expiresIn'] };
 
   const accessToken = jwt.sign({ userId, role }, process.env.JWT_SECRET!, accessOpts);
   // Include a random jti so multiple refresh tokens for the same user are distinct.

@@ -40,6 +40,17 @@ cd /root/server && git fetch origin && git reset --hard origin/main && sh script
 cd /root/server && sh scripts/vps-git-update.sh
 ```
 
+Токен Diawi (один раз в `.env`, потом пересборка). Без него админ всё равно может вставить ссылку вручную:
+
+```bash
+cd /root/server
+grep -q '^DIAWI_TOKEN=' .env || echo 'DIAWI_TOKEN=' >> .env
+nano .env   # вставь токен с https://i.diawi.com/profile/api
+docker compose up -d --build api
+```
+
+IPA кладётся в админке приложения → вкладка «Обнова». Ссылка появляется на bipmusic.ru и в самом приложении. Ставить нужно из Safari.
+
 Если API не отвечает — диагностика:
 
 ```bash
@@ -883,7 +894,10 @@ rm -rf /root/server/data    # уничтожит базу и треки
 | `PORT` / `HOST` | порт и адрес API (по умолчанию 3000 / 0.0.0.0) |
 | `DATABASE_URL` | путь к SQLite, только абсолютный: `file:/app/data/bpmz.db` |
 | `JWT_SECRET` / `JWT_REFRESH_SECRET` | разные секреты, 32+ символа |
-| `JWT_EXPIRY` / `JWT_REFRESH_EXPIRY` | время жизни токенов |
+| `JWT_EXPIRY` / `JWT_REFRESH_EXPIRY` | время жизни токенов (на сервере 30 дней / 180 дней) |
+| `DIAWI_TOKEN` | токен Diawi: админ грузит IPA, сервер сам получает ссылку для установки |
+| `PUBLIC_BASE_URL` | публичный адрес сайта, `https://bipmusic.ru` |
+| `APP_BUNDLE_ID` | bundle id приложения для OTA-установки (`bipmusic.bip`) |
 | `CORS_ORIGINS` | список разрешённых origin (в проде нельзя `*`) |
 | `INVITE_CODES` | коды приглашения через запятую |
 | `ADMIN_EMAIL` / `ADMIN_NICKNAME` / `ADMIN_PASSWORD` | учётка администратора (создаётся при первом старте) |

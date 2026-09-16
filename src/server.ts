@@ -19,6 +19,9 @@ import statsRoutes from './api/stats.js';
 import adminRoutes from './api/admin.js';
 import shareRoutes from './api/share.js';
 import landingRoutes from './api/landing.js';
+import artistShareRoutes from './api/artistShare.js';
+import appRoutes from './api/app.js';
+import { appDir } from './services/appRelease.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/logger.js';
 import { globalLimiter } from './middleware/rateLimits.js';
@@ -33,9 +36,10 @@ const PORT = process.env.PORT || 3000;
 const TRACKS_DIR = path.resolve(process.env.TRACKS_DIR || './data/tracks');
 const COVERS_DIR = path.resolve(process.env.COVERS_DIR || './data/covers');
 const DATA_DIR = path.resolve('./data');
+const APP_DIR = appDir();
 
 function ensureDirectories() {
-  for (const dir of [DATA_DIR, TRACKS_DIR, COVERS_DIR]) {
+  for (const dir of [DATA_DIR, TRACKS_DIR, COVERS_DIR, APP_DIR]) {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
       console.log(`📁 Created directory: ${dir}`);
@@ -106,9 +110,12 @@ app.use(globalLimiter);
 // they're authenticated nowhere — same as the old site's `covers` bucket signed URLs).
 app.use('/files/covers', express.static(COVERS_DIR, { maxAge: '7d' }));
 
-// Публичная страница трека для ссылок «поделиться» из приложения.
-// Отдаёт только название, артиста и обложку — под общим лимитом на IP.
+// Публичные страницы для ссылок «поделиться» из приложения.
 app.use('/t', shareRoutes);
+app.use('/a', artistShareRoutes);
+
+// IPA последней сборки (для itms-services, если Diawi не задан).
+app.use('/files/app', express.static(APP_DIR, { maxAge: '1h' }));
 
 // Главная страница домена. Весь bipmusic.ru проксируется сюда, поэтому без неё
 // на корне отдавался JSON «Route not found».
@@ -123,6 +130,7 @@ app.use('/api/playlists', playlistsRoutes);
 app.use('/api/likes', likesRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/app', appRoutes);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({ error: 'Route not found' });

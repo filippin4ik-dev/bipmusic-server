@@ -9,7 +9,7 @@ bipmusic.ru {
 
     # Large file uploads up to ~250 MB (admin upload)
     request_body {
-        max_size 250MB
+        max_size 400MB
     }
 
     reverse_proxy api:3000 {

@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import { prisma } from '../db.js';
+import { publicRelease, readRelease } from '../services/appRelease.js';
 
 /**
  * Главная страница bipmusic.ru.
@@ -25,10 +26,14 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-function publicOrigin(req: Request): string {
+export function publicOriginFrom(req: Request): string {
   const configured = process.env.PUBLIC_BASE_URL?.trim().replace(/\/+$/, '');
   if (configured) return configured;
   return `${req.protocol}://${req.get('host') ?? 'bipmusic.ru'}`;
+}
+
+function publicOrigin(req: Request): string {
+  return publicOriginFrom(req);
 }
 
 /** «трек», «трека», «треков» — иначе подписи под цифрами читаются криво. */
@@ -132,24 +137,40 @@ const STYLE = `<style>
     box-shadow: 0 48px 90px rgba(0,0,0,.58);
   }
   .screen { border-radius: 32px; background: var(--bg); overflow: hidden; }
-  .screen__hero { position: relative; height: 290px; }
-  .screen__hero img, .screen__hero .fill {
-    width: 100%; height: 100%; object-fit: cover; display: block;
+  .screen__stage {
+    position: relative; display: flex; flex-direction: column; align-items: center;
+    padding: 44px 20px 22px; min-height: 360px; overflow: hidden;
+  }
+  .screen__blur, .screen__fill {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; filter: blur(34px) saturate(1.25); transform: scale(1.28);
     background: linear-gradient(140deg, var(--primary), var(--sky));
   }
-  .screen__hero::after {
-    content: ""; position: absolute; inset: 0;
-    background: linear-gradient(180deg, transparent 30%, rgba(9,10,15,.55) 70%, var(--bg));
+  .screen__veil {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 70% 55% at 50% 32%, transparent 0%, rgba(9,10,15,.2) 55%, var(--bg) 100%),
+      linear-gradient(180deg, rgba(9,10,15,.2) 0%, rgba(9,10,15,.55) 62%, var(--bg) 100%);
   }
-  .screen__dots {
-    position: absolute; left: 22px; bottom: 78px; z-index: 1; display: flex; gap: 5px;
+  .screen__portrait {
+    position: relative; z-index: 1;
+    width: 168px; height: 168px; border-radius: 50%; object-fit: cover; object-position: center top;
+    display: block; flex: none;
+    border: 3px solid rgba(255,255,255,.32);
+    box-shadow: 0 0 0 8px rgba(9,10,15,.28), 0 22px 44px rgba(0,0,0,.55);
+    background: linear-gradient(140deg, var(--primary), var(--sky));
   }
-  .screen__dots i { width: 6px; height: 6px; border-radius: 99px; background: rgba(255,255,255,.35); display: block; }
-  .screen__dots i.on { width: 16px; background: #fff; }
-  .screen__caption { position: absolute; left: 22px; right: 22px; bottom: 18px; z-index: 1; }
-  .screen__caption .who { font-size: 10px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--primary); font-weight: 600; }
-  .screen__caption h3 { margin: 4px 0 4px; font-size: 26px; letter-spacing: -.6px; }
+  .screen__portrait--empty { display: grid; place-items: center; font-size: 64px; color: #10231c; }
+  .screen__caption { position: relative; z-index: 1; text-align: center; margin-top: 18px; }
+  .screen__caption .who { font-size: 10px; letter-spacing: 1.8px; text-transform: uppercase; color: var(--primary); font-weight: 600; }
+  .screen__caption h3 { margin: 6px 0 4px; font-size: 24px; letter-spacing: -.5px; }
   .screen__caption p { margin: 0; font-size: 12px; color: var(--muted); }
+  .update {
+    margin: 28px 0 0; padding: 14px 18px; border-radius: 16px;
+    border: 1px solid rgba(52, 211, 153, .35); background: rgba(52, 211, 153, .1);
+    font-size: 14px;
+  }
+  .update a { color: var(--primary); font-weight: 600; text-decoration: none; }
   .screen__body { padding: 8px 18px 22px; }
   .screen__play {
     display: flex; gap: 8px; margin-bottom: 16px;
@@ -230,18 +251,27 @@ const STYLE = `<style>
   }
 </style>`;
 
+type FeaturedArtist = {
+  name: string;
+  photo: string | null;
+  albums: number;
+  tracks: number;
+};
+
 type Catalogue = {
   tracks: number;
   artists: number;
   albums: number;
   covers: string[];
   portraits: string[];
+  featured: FeaturedArtist | null;
 };
 
 /** Пустой каталог вместо падения: главная не должна зависеть от базы. */
 async function readCatalogue(): Promise<Catalogue> {
+  const empty: Catalogue = { tracks: 0, artists: 0, albums: 0, covers: [], portraits: [], featured: null };
   try {
-    const [tracks, albums, artists, recentAlbums, recentArtists] = await Promise.all([
+    const [tracks, albums, artists, recentAlbums, recentArtists, galleryPhotos] = await Promise.all([
       prisma.track.count(),
       prisma.album.count(),
       prisma.artist.count(),
@@ -252,21 +282,44 @@ async function readCatalogue(): Promise<Catalogue> {
         select: { coverUrl: true },
       }),
       prisma.artist.findMany({
-        where: { imageUrl: { not: null } },
+        where: { OR: [{ imageUrl: { not: null } }, { photos: { some: {} } }] },
         orderBy: { updatedAt: 'desc' },
         take: 10,
+        select: {
+          name: true,
+          imageUrl: true,
+          photos: { orderBy: { position: 'asc' }, take: 1, select: { imageUrl: true } },
+          _count: { select: { tracks: true, albums: true } },
+        },
+      }),
+      prisma.artistPhoto.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 12,
         select: { imageUrl: true },
       }),
     ]);
+    const portraits = [
+      ...recentArtists.map((a) => a.imageUrl || a.photos[0]?.imageUrl || '').filter(Boolean),
+      ...galleryPhotos.map((p) => p.imageUrl),
+    ].filter((v, i, arr) => v && arr.indexOf(v) === i);
+    const lead = recentArtists[0];
     return {
       tracks,
       albums,
       artists,
       covers: recentAlbums.map((a) => a.coverUrl).filter((c): c is string => Boolean(c)),
-      portraits: recentArtists.map((a) => a.imageUrl).filter((c): c is string => Boolean(c)),
+      portraits,
+      featured: lead
+        ? {
+            name: lead.name,
+            photo: lead.imageUrl || lead.photos[0]?.imageUrl || null,
+            albums: lead._count.albums,
+            tracks: lead._count.tracks,
+          }
+        : null,
     };
   } catch {
-    return { tracks: 0, artists: 0, albums: 0, covers: [], portraits: [] };
+    return empty;
   }
 }
 
@@ -307,13 +360,13 @@ const FEATURES = [
   },
   {
     icon: ICON.link,
-    title: 'Ссылки на треки',
-    text: 'Ссылкой можно поделиться в любом мессенджере: превью с обложкой и кнопка «Открыть в приложении».',
+    title: 'Ссылки на треки и артистов',
+    text: 'Карточка с фото и именем открывается из любого мессенджера — и сразу ведёт в приложение.',
   },
   {
     icon: ICON.ban,
     title: 'Ни рекламы, ни подписки',
-    text: 'Свой сервер, свой каталог, свои правила. Реклама и подписка тут просто не предусмотрены.',
+    text: 'Ни баннеров, ни «попробуй премиум». Только музыка.',
   },
 ];
 
@@ -322,8 +375,7 @@ router.get('/', async (req: Request, res: Response) => {
   const catalogue = await readCatalogue();
   const origin = publicOrigin(req);
   const coverUrl = (file: string) => `${origin}/files/covers/${encodeURIComponent(file)}`;
-  const description =
-    'Личный музыкальный сервис: свой каталог, зашифрованные файлы, офлайн, текст песни за музыкой. Вход по коду приглашения.';
+  const description = 'bipMusic — музыка, которую хочется слушать. Артисты, альбомы, текст за песней, офлайн.';
 
   // Ряд должен быть шире экрана, иначе сдвиг на половину виден как прыжок.
   const marqueeRow = (items: Array<{ file: string; round?: boolean }>) => {
@@ -368,24 +420,41 @@ router.get('/', async (req: Request, res: Response) => {
     </div>`
     : '';
 
-  const heroPhoto = catalogue.portraits[0] || catalogue.covers[0];
+  const heroPhoto = catalogue.featured?.photo || catalogue.portraits[0] || null;
+  const photoSrc = heroPhoto ? escapeHtml(coverUrl(heroPhoto)) : '';
   const screenHero = heroPhoto
-    ? `<img src="${escapeHtml(coverUrl(heroPhoto))}" alt="">`
-    : '<div class="fill"></div>';
-
+    ? `<img class="screen__blur" src="${photoSrc}" alt="">
+            <div class="screen__veil"></div>
+            <img class="screen__portrait" src="${photoSrc}" alt="">`
+    : `<div class="screen__fill"></div>
+            <div class="screen__veil"></div>
+            <div class="screen__portrait screen__portrait--empty">♪</div>`;
+  const mockName = catalogue.featured?.name || 'Артист';
+  const mockStats = catalogue.featured
+    ? `${pluralWord(catalogue.featured.albums, 'альбом', 'альбома', 'альбомов')} · ${pluralWord(catalogue.featured.tracks, 'трек', 'трека', 'треков')}`
+    : 'альбомы · треки · фото';
   const ogImage = heroPhoto ? coverUrl(heroPhoto) : '';
+  const release = readRelease();
+  const install = release
+    ? publicRelease(release, origin)
+    : null;
+  const installHref = install?.url || '#app';
+  const installBtn = `<a class="btn btn--primary" href="${escapeHtml(installHref)}">${install ? `Установить ${escapeHtml(install.version)}` : 'Установить на iPhone'}</a>`;
+  const updateBanner = install
+    ? `<div class="update">Вышла версия ${escapeHtml(install.version)}${install.notes ? ` — ${escapeHtml(install.notes)}` : ''}. <a href="${escapeHtml(install.url)}">Скачать на iPhone</a></div>`
+    : '';
 
   const html = `<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>bipMusic — свой музыкальный сервис</title>
+<title>bipMusic</title>
 <meta name="description" content="${escapeHtml(description)}">
 <meta name="theme-color" content="#0e0f14">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="bipMusic">
-<meta property="og:title" content="bipMusic — свой музыкальный сервис">
+<meta property="og:title" content="bipMusic">
 <meta property="og:description" content="${escapeHtml(description)}">
 <meta property="og:url" content="${escapeHtml(origin)}">
 ${ogImage ? `<meta property="og:image" content="${escapeHtml(ogImage)}">\n<meta name="twitter:card" content="summary_large_image">` : '<meta name="twitter:card" content="summary">'}
@@ -402,32 +471,31 @@ ${STYLE}
     <div class="mark">♪</div>
     <div class="brand">bip<span>Music</span></div>
     <div class="spacer"></div>
-    <a href="#access">Как получить доступ</a>
+    <a href="#app">Установить</a>
   </header>
 
   <main>
     <section class="hero">
       <div>
-        <p class="eyebrow">Частный музыкальный сервер</p>
-        <h1>Музыка, которая <em>принадлежит тебе</em></h1>
-        <p>Свой сервер, свой каталог, свои артисты. Загружаешь то, что слушаешь, и оно не исчезает из-за истёкшей лицензии.</p>
-        <p class="note">Сервис закрытый: регистрация по коду приглашения и подтверждению админом.</p>
+        <p class="eyebrow">bipMusic</p>
+        <h1>Музыка, которую <em>хочется слушать</em></h1>
+        <p>Артисты, альбомы и текст, который идёт за песней. Офлайн — с тобой, даже без сети.</p>
         <div class="actions">
-          <a class="btn btn--primary" href="${APP_SCHEME}://">Открыть в приложении</a>
-          <a class="btn btn--ghost" href="#access">Как получить доступ</a>
+          ${installBtn}
+          <a class="btn btn--ghost" href="${APP_SCHEME}://">Открыть приложение</a>
         </div>
         ${stats}
+        ${updateBanner}
       </div>
 
       <div class="phone" aria-hidden="true">
         <div class="screen">
-          <div class="screen__hero">
+          <div class="screen__stage">
             ${screenHero}
-            <div class="screen__dots"><i class="on"></i><i></i><i></i></div>
             <div class="screen__caption">
               <div class="who">артист</div>
-              <h3>Карточка артиста</h3>
-              <p>альбомы · треки · фото</p>
+              <h3>${escapeHtml(mockName)}</h3>
+              <p>${escapeHtml(mockStats)}</p>
             </div>
           </div>
           <div class="screen__body">
@@ -454,16 +522,16 @@ ${STYLE}
       ).join('\n      ')}
     </div>
 
-    <h2 id="access">Как получить доступ</h2>
+    <h2 id="app">Приложение</h2>
     <ol class="steps">
-      <li>Возьми код приглашения у владельца сервера.<small>Без кода регистрация не проходит.</small></li>
-      <li>Установи приложение и зарегистрируйся с этим кодом.<small>Приложение раздаётся напрямую, не через App Store.</small></li>
-      <li>Дождись подтверждения аккаунта.<small>Пока заявку не одобрили, каталог не открывается.</small></li>
+      <li>Открой эту страницу на iPhone в Safari.<small>Из других браузеров установка не проходит — так устроен iOS.</small></li>
+      <li>Нажми «Установить» и подтверди загрузку.<small>${install ? `Сейчас на сайте версия ${escapeHtml(install.version)}.` : 'Когда админ выложит сборку, кнопка появится сверху.'}</small></li>
+      <li>После установки доверь разработчика в Настройках, если iOS попросит.<small>Настройки → Основные → VPN и управление устройством.</small></li>
     </ol>
   </main>
 
   <footer>
-    bipMusic · частный музыкальный сервер · <a href="${APP_SCHEME}://">открыть приложение</a>
+    bipMusic${install ? ` · версия ${escapeHtml(install.version)}` : ''} · <a href="${APP_SCHEME}://">открыть приложение</a>
   </footer>
 </div>
 </body>
@@ -474,6 +542,43 @@ ${STYLE}
   // базы, если по домену пройдётся бот.
   res.set('Cache-Control', 'public, max-age=60');
   res.send(html);
+});
+
+/** Страница установки. Diawi надо открывать в Safari — редиректим туда, если ссылка есть. */
+router.get('/app', (req: Request, res: Response) => {
+  const release = readRelease();
+  if (!release) {
+    res.status(404).type('html').send('<!DOCTYPE html><html lang="ru"><meta charset="utf-8"><title>Нет сборки</title><body style="background:#090a0f;color:#f7f8fa;font-family:sans-serif;padding:40px">Сборку ещё не выложили.</body></html>');
+    return;
+  }
+  if (release.diawiUrl) {
+    res.redirect(302, release.diawiUrl);
+    return;
+  }
+  const origin = publicOrigin(req);
+  const manifest = `${origin}/api/app/manifest.plist`;
+  const itms = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifest)}`;
+  res.type('html').send(`<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Установить bipMusic ${escapeHtml(release.version)}</title>
+<meta name="theme-color" content="#090a0f">
+<style>
+  body { margin:0; min-height:100vh; display:grid; place-items:center; background:#090a0f; color:#f7f8fa; font-family:-apple-system,BlinkMacSystemFont,sans-serif; text-align:center; padding:32px; }
+  a { display:inline-block; margin-top:24px; padding:14px 28px; border-radius:999px; background:#34d399; color:#10231c; font-weight:700; text-decoration:none; }
+  p { color:#9ea4b0; max-width:36ch; }
+</style>
+</head>
+<body>
+  <div>
+    <h1>bipMusic ${escapeHtml(release.version)}</h1>
+    <p>Открой эту страницу в Safari и нажми кнопку. Другие браузеры установку не запускают.</p>
+    <a href="${escapeHtml(itms)}">Установить</a>
+  </div>
+</body>
+</html>`);
 });
 
 export default router;

@@ -21,6 +21,14 @@ import {
   syncTrackFeatArtists,
   syncAlbumFeatArtists,
 } from '../utils/trackSerialize.js';
+import {
+  appDir,
+  publicRelease,
+  readRelease,
+  uploadToDiawi,
+  writeRelease,
+  type AppRelease,
+} from '../services/appRelease.js';
 
 const router = express.Router();
 
@@ -731,6 +739,86 @@ router.put('/tracks/:id', requireAdmin, async (req: AuthRequest, res: Response) 
   await audit({ userId: req.userId, event: 'TRACK_UPDATED', payload: { trackId: req.params.id } });
   res.json(serializeTrack(updated));
 });
+
+const ipaUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, appDir()),
+    filename: (_req, _file, cb) => cb(null, 'bipmusic.ipa'),
+  }),
+  limits: { fileSize: 350 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const ok = ext === '.ipa' || file.mimetype === 'application/octet-stream';
+    cb(null, ok);
+  },
+});
+
+function originOf(req: AuthRequest): string {
+  const configured = process.env.PUBLIC_BASE_URL?.trim().replace(/\/+$/, '');
+  if (configured) return configured;
+  return `${req.protocol}://${req.get('host') ?? 'bipmusic.ru'}`;
+}
+
+router.get('/app/release', requireAdmin, (_req: AuthRequest, res: Response) => {
+  const release = readRelease();
+  if (!release) return res.json({ data: null, diawiConfigured: Boolean(process.env.DIAWI_TOKEN?.trim()) });
+  res.json({
+    data: { ...publicRelease(release, originOf(_req)), ipaFilename: release.ipaFilename },
+    diawiConfigured: Boolean(process.env.DIAWI_TOKEN?.trim()),
+  });
+});
+
+router.post(
+  '/app/release',
+  requireAdmin,
+  ipaUpload.single('ipa'),
+  async (req: AuthRequest, res: Response) => {
+    const version = String(req.body?.version || '').trim();
+    const notes = String(req.body?.notes || '').trim() || null;
+    const pastedDiawi = String(req.body?.diawiUrl || '').trim() || null;
+    const build = parseInt(String(req.body?.build || '0'), 10) || 0;
+    if (!version) {
+      if (req.file) safeUnlink(req.file.path);
+      return res.status(400).json({ error: 'Укажи номер версии, например 1.1' });
+    }
+
+    const previous = readRelease();
+    let diawiUrl = pastedDiawi || previous?.diawiUrl || null;
+    let ipaFilename = req.file ? req.file.filename : previous?.ipaFilename || null;
+    let diawiError: string | null = null;
+
+    if (req.file && process.env.DIAWI_TOKEN?.trim()) {
+      try {
+        diawiUrl = await uploadToDiawi(req.file.path);
+      } catch (err) {
+        diawiError = err instanceof Error ? err.message : String(err);
+      }
+    }
+
+    if (!diawiUrl && !ipaFilename) {
+      return res.status(400).json({ error: 'Нужен IPA или ссылка Diawi' });
+    }
+
+    const release: AppRelease = {
+      version,
+      build,
+      notes,
+      diawiUrl,
+      ipaFilename,
+      publishedAt: new Date().toISOString(),
+    };
+    writeRelease(release);
+    await audit({
+      userId: req.userId,
+      event: 'APP_RELEASE_PUBLISHED',
+      payload: { version, build, diawiUrl, ipaFilename, diawiError },
+    });
+    res.json({
+      data: { ...publicRelease(release, originOf(req)), ipaFilename },
+      diawiError,
+    });
+  }
+);
 
 router.delete('/tracks/:id', requireAdmin, async (req: AuthRequest, res: Response) => {
   const track = await prisma.track.findUnique({ where: { id: req.params.id } });

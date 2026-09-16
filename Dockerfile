@@ -33,7 +33,7 @@ COPY --from=builder /app/prisma ./prisma
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 
 RUN chmod +x /app/docker-entrypoint.sh \
-    && mkdir -p /app/data/tracks /app/data/covers /app/data/tmp
+    && mkdir -p /app/data/tracks /app/data/covers /app/data/tmp /app/data/app
 
 EXPOSE 3000
 

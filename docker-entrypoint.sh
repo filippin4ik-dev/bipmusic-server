@@ -12,7 +12,17 @@ LEGACY_DB="/app/data/groov.db"
 MISPLACED_DIR="/app/prisma/data"
 BACKUP_DIR="/app/data/backups"
 
-mkdir -p /app/data/tracks /app/data/covers /app/data/tmp /app/data/backups
+mkdir -p /app/data/tracks /app/data/covers /app/data/tmp /app/data/backups /app/data/app
+
+# Старый .env держал access-токен 24 часа — приложение выкидывало из аккаунта.
+if [ "${JWT_EXPIRY:-}" = "24h" ]; then
+  export JWT_EXPIRY=30d
+  echo "[entrypoint] JWT_EXPIRY 24h → 30d"
+fi
+if [ "${JWT_REFRESH_EXPIRY:-}" = "30d" ] || [ -z "${JWT_REFRESH_EXPIRY:-}" ]; then
+  export JWT_REFRESH_EXPIRY=180d
+  echo "[entrypoint] JWT_REFRESH_EXPIRY → 180d"
+fi
 
 # --- volume: данные должны жить на диске VPS, не в слое контейнера ---
 DATA_MOUNTED=0
