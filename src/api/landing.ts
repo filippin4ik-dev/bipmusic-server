@@ -143,26 +143,24 @@ const STYLE = `<style>
   }
   .screen__blur, .screen__fill {
     position: absolute; inset: 0; width: 100%; height: 100%;
-    object-fit: cover; filter: blur(34px) saturate(1.25); transform: scale(1.28);
-    background: linear-gradient(140deg, var(--primary), var(--sky));
+    object-fit: cover; filter: blur(34px) saturate(.6); transform: scale(1.28);
+    background: #14151c;
   }
   .screen__veil {
     position: absolute; inset: 0;
     background:
-      radial-gradient(ellipse 70% 55% at 50% 32%, transparent 0%, rgba(9,10,15,.2) 55%, var(--bg) 100%),
-      linear-gradient(180deg, rgba(9,10,15,.2) 0%, rgba(9,10,15,.55) 62%, var(--bg) 100%);
+      radial-gradient(ellipse 70% 55% at 50% 32%, transparent 0%, rgba(9,10,15,.35) 55%, var(--bg) 100%),
+      linear-gradient(180deg, rgba(9,10,15,.25) 0%, rgba(9,10,15,.6) 62%, var(--bg) 100%);
   }
   .screen__portrait {
     position: relative; z-index: 1;
     width: 168px; height: 168px; border-radius: 50%; object-fit: cover; object-position: center top;
-    display: block; flex: none;
-    border: 3px solid rgba(255,255,255,.32);
-    box-shadow: 0 0 0 8px rgba(9,10,15,.28), 0 22px 44px rgba(0,0,0,.55);
-    background: linear-gradient(140deg, var(--primary), var(--sky));
+    display: block; flex: none; border: 0; outline: none; box-shadow: none;
+    background: #17181f;
   }
-  .screen__portrait--empty { display: grid; place-items: center; font-size: 64px; color: #10231c; }
+  .screen__portrait--empty { display: grid; place-items: center; font-size: 64px; color: #6f6f7a; }
   .screen__caption { position: relative; z-index: 1; text-align: center; margin-top: 18px; }
-  .screen__caption .who { font-size: 10px; letter-spacing: 1.8px; text-transform: uppercase; color: var(--primary); font-weight: 600; }
+  .screen__caption .who { font-size: 10px; letter-spacing: 1.8px; text-transform: uppercase; color: var(--muted); font-weight: 600; }
   .screen__caption h3 { margin: 6px 0 4px; font-size: 24px; letter-spacing: -.5px; }
   .screen__caption p { margin: 0; font-size: 12px; color: var(--muted); }
   .update {

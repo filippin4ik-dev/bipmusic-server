@@ -31,11 +31,11 @@ const STYLE = `<style>
   .bg { position: absolute; inset: -40px; background-size: cover; background-position: center; filter: blur(36px) saturate(1.15); transform: scale(1.15); opacity: .45; }
   .veil { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(9,10,15,.3), #090a0f 75%); }
   .card { position: relative; z-index: 1; width: 100%; max-width: 340px; }
-  .who { font-size: 11px; letter-spacing: 1.8px; text-transform: uppercase; color: #34d399; font-weight: 600; }
+  .who { font-size: 11px; letter-spacing: 1.8px; text-transform: uppercase; color: #9ea4b0; font-weight: 600; }
   .portrait {
     width: 168px; height: 168px; margin: 18px auto 20px; border-radius: 50%;
     object-fit: cover; display: block; background: #17181f;
-    border: 3px solid rgba(255,255,255,.22); box-shadow: 0 22px 48px rgba(0,0,0,.5);
+    border: 0; outline: none; box-shadow: none;
   }
   .portrait--empty { display: grid; place-items: center; font-size: 64px; }
   h1 { margin: 0 0 8px; font-size: 28px; line-height: 1.15; letter-spacing: -.4px; }
