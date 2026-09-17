@@ -14,9 +14,10 @@ model User {
   role     String   @default("USER")
   profile  Profile?
 
-  playlists   Playlist[]
-  likedTracks LikedTrack[]
-  trackPlays  TrackPlay[]
+  playlists    Playlist[]
+  likedTracks  LikedTrack[]
+  likedArtists LikedArtist[]
+  trackPlays   TrackPlay[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -52,6 +53,7 @@ model Artist {
   albums       Album[]
   tracks       Track[]
   photos       ArtistPhoto[]
+  likedBy      LikedArtist[]
   trackCredits TrackArtist[]
   albumCredits AlbumArtist[]
 
@@ -233,6 +235,19 @@ model LikedTrack {
 
   @@id([userId, trackId])
   @@index([trackId])
+}
+
+model LikedArtist {
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  artistId String
+  artist   Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  likedAt DateTime @default(now())
+
+  @@id([userId, artistId])
+  @@index([artistId])
 }
 
 model TrackPlay {

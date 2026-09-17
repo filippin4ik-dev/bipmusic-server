@@ -73,6 +73,46 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   res.json(serializePlaylist(playlist));
 });
 
+const PlaylistUpdateSchema = z.object({
+  title: z.string().min(1).max(100).optional(),
+  description: z.string().nullable().optional(),
+});
+
+// PUT /api/playlists/:id
+router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
+  const data = PlaylistUpdateSchema.parse(req.body);
+  if (data.title === undefined && data.description === undefined) {
+    return res.status(400).json({ error: 'Нечего менять' });
+  }
+
+  const playlist = await prisma.playlist.findUnique({ where: { id: req.params.id } });
+  if (!playlist || playlist.userId !== req.userId) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  const updated = await prisma.playlist.update({
+    where: { id: playlist.id },
+    data: {
+      ...(data.title !== undefined ? { title: data.title } : {}),
+      ...(data.description !== undefined ? { description: data.description } : {}),
+    },
+    include: playlistDetailInclude,
+  });
+
+  res.json(serializePlaylist(updated));
+});
+
+// DELETE /api/playlists/:id
+router.delete('/:id', authenticate, async (req: AuthRequest, res: Response) => {
+  const playlist = await prisma.playlist.findUnique({ where: { id: req.params.id } });
+  if (!playlist || playlist.userId !== req.userId) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  await prisma.playlist.delete({ where: { id: playlist.id } });
+  res.json({ message: 'Playlist deleted' });
+});
+
 router.post('/:id/share', authenticate, async (req: AuthRequest, res: Response) => {
   const playlist = await prisma.playlist.findUnique({ where: { id: req.params.id } });
   if (!playlist || playlist.userId !== req.userId) {
