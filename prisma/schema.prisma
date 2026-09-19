@@ -289,3 +289,13 @@ model AlbumArtist {
   @@id([albumId, artistId])
   @@index([artistId])
 }
+
+model Announcement {
+  id        String   @id @default(uuid())
+  title     String
+  body      String
+  authorId  String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}

@@ -23,6 +23,7 @@ import artistShareRoutes from './api/artistShare.js';
 import albumShareRoutes from './api/albumShare.js';
 import playlistShareRoutes from './api/playlistShare.js';
 import appRoutes from './api/app.js';
+import announcementsRoutes from './api/announcements.js';
 import { appDir } from './services/appRelease.js';
 import { requireFreshApp } from './middleware/appVersion.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -146,6 +147,7 @@ app.use('/api/likes', likesRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/app', appRoutes);
+app.use('/api/announcements', announcementsRoutes);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({ error: 'Route not found' });

@@ -42,17 +42,23 @@ if (!fs.existsSync(COVERS_DIR)) fs.mkdirSync(COVERS_DIR, { recursive: true });
 
 const trackUpload = multer({
   storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, TMP_DIR),
+    destination: (_req, file, cb) => {
+      cb(null, file.fieldname === 'cover' ? COVERS_DIR : TMP_DIR);
+    },
     filename: (_req, file, cb) => {
-      const ext = path.extname(file.originalname).toLowerCase() || '.mp3';
+      const ext = path.extname(file.originalname).toLowerCase()
+        || (file.fieldname === 'cover' ? '.jpg' : '.mp3');
       cb(null, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`);
     },
   }),
   limits: { fileSize: 200 * 1024 * 1024 }, // 200 MB
   fileFilter: (_req, file, cb) => {
-    const allowed = ['.mp3', '.m4a', '.flac', '.wav', '.ogg', '.aac'];
     const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, allowed.includes(ext));
+    if (file.fieldname === 'cover') {
+      cb(null, ['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(ext));
+      return;
+    }
+    cb(null, ['.mp3', '.m4a', '.flac', '.wav', '.ogg', '.aac'].includes(ext));
   },
 });
 
@@ -102,6 +108,19 @@ function normalizeBio(value: unknown): string | null {
 
 function safeUnlink(p: string) {
   try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch {}
+}
+
+/** «Track (Remix)» / «Song [Official]» → чистое название при загрузке. */
+function cleanTrackTitle(raw: unknown): string {
+  let out = String(raw ?? '').trim();
+  const original = out;
+  for (let i = 0; i < 8; i++) {
+    const next = out.replace(/\s*[\(\[\{][^\)\]\}]*[\)\]\}]/g, '');
+    if (next === out) break;
+    out = next;
+  }
+  out = out.replace(/\s+/g, ' ').trim();
+  return out || original;
 }
 
 /**
@@ -657,7 +676,7 @@ router.post(
     try {
       track = await prisma.track.create({
         data: {
-          title: String(title).trim(),
+          title: cleanTrackTitle(title),
           artistId: String(artistId),
           albumId: albumId ? String(albumId) : null,
           duration: parseInt(String(duration ?? 0), 10) || 0,
@@ -721,7 +740,7 @@ router.put('/tracks/:id', requireAdmin, async (req: AuthRequest, res: Response) 
   await prisma.track.update({
     where: { id: req.params.id },
     data: {
-      title: title?.trim(),
+      title: title === undefined ? undefined : cleanTrackTitle(title),
       artistId,
       albumId: albumId === undefined ? undefined : (albumId || null),
       duration: duration === undefined ? undefined : parseInt(String(duration), 10),
@@ -870,6 +889,46 @@ router.get('/audit', requireAdmin, async (req: AuthRequest, res: Response) => {
     take,
   });
   res.json({ data: events });
+});
+
+// =====================================================================
+// ANNOUNCEMENTS (admin compose → iPhone local notifications)
+// =====================================================================
+
+router.get('/announcements', requireAdmin, async (_req: AuthRequest, res: Response) => {
+  const data = await prisma.announcement.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+  });
+  res.json({ data });
+});
+
+router.post('/announcements', requireAdmin, async (req: AuthRequest, res: Response) => {
+  const title = String(req.body?.title ?? '').trim();
+  const body = String(req.body?.body ?? '').trim();
+  if (!title || !body) {
+    return res.status(400).json({ error: 'Нужны заголовок и текст' });
+  }
+  const item = await prisma.announcement.create({
+    data: {
+      title: title.slice(0, 120),
+      body: body.slice(0, 1000),
+      authorId: req.userId,
+    },
+  });
+  await audit({
+    userId: req.userId,
+    event: 'ANNOUNCEMENT_SENT',
+    payload: { id: item.id, title: item.title },
+  });
+  res.status(201).json(item);
+});
+
+router.delete('/announcements/:id', requireAdmin, async (req: AuthRequest, res: Response) => {
+  const existing = await prisma.announcement.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+  await prisma.announcement.delete({ where: { id: req.params.id } });
+  res.json({ success: true });
 });
 
 export default router;

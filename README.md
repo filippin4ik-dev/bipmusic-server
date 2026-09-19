@@ -1,3 +1,24 @@
+# Как обновить сервер (скопируй в Termius)
+
+```bash
+cd /root/server && sh scripts/vps-git-update.sh
+```
+
+Эта команда забирает свежий код с GitHub и пересобирает Docker.  
+`.env` и папка `data/` (база, треки, обложки) не трогаются.
+
+Проверка, что API жив:
+
+```bash
+curl -I https://bipmusic.ru/api/health
+```
+
+Должен ответить `200`. Если сборка упала — `cd /root/server && docker compose logs -f api`.
+
+Приложение после сервера пересобирается отдельно: см. `bipmusic-ios/README.md` (Xcode → Archive → Админка → Обнова).
+
+---
+
 # BPMz — сервер (API)
 
 Backend музыкального сервиса BPMz: Node.js + Express + Prisma + SQLite.
