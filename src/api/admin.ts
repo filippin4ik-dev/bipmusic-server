@@ -29,6 +29,16 @@ import {
   writeRelease,
   type AppRelease,
 } from '../services/appRelease.js';
+import {
+  YandexMusicError,
+  clearYandexToken,
+  fetchTimedLyrics,
+  isYandexConfigured,
+  pollDeviceToken,
+  requestDeviceCode,
+  saveYandexToken,
+  searchTracks,
+} from '../services/yandexMusic.js';
 
 const router = express.Router();
 
@@ -929,6 +939,79 @@ router.delete('/announcements/:id', requireAdmin, async (req: AuthRequest, res: 
   if (!existing) return res.status(404).json({ error: 'Not found' });
   await prisma.announcement.delete({ where: { id: req.params.id } });
   res.json({ success: true });
+});
+
+// =====================================================================
+// Yandex Music lyrics (LuckyWins/yandex-music-api endpoints)
+// =====================================================================
+
+function yandexFail(res: Response, err: unknown) {
+  if (err instanceof YandexMusicError) {
+    return res.status(err.status).json({ error: err.message });
+  }
+  return res.status(502).json({ error: err instanceof Error ? err.message : 'Яндекс недоступен' });
+}
+
+router.get('/yandex/status', requireAdmin, (_req: AuthRequest, res: Response) => {
+  res.json({ configured: isYandexConfigured() });
+});
+
+router.post('/yandex/token', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    saveYandexToken(String(req.body?.token ?? ''));
+    await audit({ userId: req.userId, event: 'YANDEX_TOKEN_SAVED' });
+    res.json({ configured: true });
+  } catch (err) {
+    yandexFail(res, err);
+  }
+});
+
+router.delete('/yandex/token', requireAdmin, async (req: AuthRequest, res: Response) => {
+  clearYandexToken();
+  await audit({ userId: req.userId, event: 'YANDEX_TOKEN_CLEARED' });
+  res.json({ configured: false, success: true });
+});
+
+router.post('/yandex/device-code', requireAdmin, async (_req: AuthRequest, res: Response) => {
+  try {
+    res.json(await requestDeviceCode());
+  } catch (err) {
+    yandexFail(res, err);
+  }
+});
+
+router.post('/yandex/device-poll', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const deviceCode = String(req.body?.deviceCode ?? '').trim();
+    if (!deviceCode) return res.status(400).json({ error: 'Нет deviceCode' });
+    const result = await pollDeviceToken(deviceCode);
+    if (!result.pending) {
+      await audit({ userId: req.userId, event: 'YANDEX_TOKEN_SAVED' });
+    }
+    res.json(result);
+  } catch (err) {
+    yandexFail(res, err);
+  }
+});
+
+router.get('/yandex/search', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const q = String(req.query.q ?? '');
+    res.json({ data: await searchTracks(q) });
+  } catch (err) {
+    yandexFail(res, err);
+  }
+});
+
+router.post('/yandex/lyrics', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const yandexTrackId = String(req.body?.yandexTrackId ?? '').trim();
+    const durationMs = req.body?.durationMs == null ? undefined : Number(req.body.durationMs);
+    const result = await fetchTimedLyrics(yandexTrackId, Number.isFinite(durationMs) ? durationMs : undefined);
+    res.json(result);
+  } catch (err) {
+    yandexFail(res, err);
+  }
 });
 
 export default router;
