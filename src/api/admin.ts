@@ -36,7 +36,7 @@ import {
   isYandexConfigured,
   pollDeviceToken,
   requestDeviceCode,
-  saveYandexToken,
+  saveAndVerifyYandexToken,
   searchTracks,
 } from '../services/yandexMusic.js';
 
@@ -947,7 +947,9 @@ router.delete('/announcements/:id', requireAdmin, async (req: AuthRequest, res: 
 
 function yandexFail(res: Response, err: unknown) {
   if (err instanceof YandexMusicError) {
-    return res.status(err.status).json({ error: err.message });
+    // 401/403 сюда не пускаем: приложение приняло бы это за протухший JWT.
+    const status = err.status === 401 || err.status === 403 ? 400 : err.status;
+    return res.status(status).json({ error: err.message });
   }
   return res.status(502).json({ error: err instanceof Error ? err.message : 'Яндекс недоступен' });
 }
@@ -958,7 +960,7 @@ router.get('/yandex/status', requireAdmin, (_req: AuthRequest, res: Response) =>
 
 router.post('/yandex/token', requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    saveYandexToken(String(req.body?.token ?? ''));
+    await saveAndVerifyYandexToken(String(req.body?.token ?? ''));
     await audit({ userId: req.userId, event: 'YANDEX_TOKEN_SAVED' });
     res.json({ configured: true });
   } catch (err) {

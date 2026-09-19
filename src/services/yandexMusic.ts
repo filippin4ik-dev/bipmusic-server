@@ -11,6 +11,7 @@ import path from 'path';
  */
 const API = 'https://api.music.yandex.net';
 const OAUTH = 'https://oauth.yandex.ru';
+const USER_AGENT = 'Yandex-Music-API';
 const CLIENT = 'YandexMusicAndroid/24023621';
 const SIGN_KEY = 'p93jhgh689SBReK6ghtw62';
 const DEFAULT_CLIENT_ID = '23cabbbdc6cd418abb4b39c32c41195d';
@@ -27,17 +28,27 @@ export class YandexMusicError extends Error {
 
 type TokenFile = { accessToken: string; savedAt?: string };
 
+export function normalizeYandexToken(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^OAuth\s+/i, '')
+    .replace(/^Bearer\s+/i, '')
+    .replace(/^["']+|["']+$/g, '')
+    .replace(/\s+/g, '');
+}
+
 export function getYandexToken(): string | null {
-  const fromEnv = process.env.YANDEX_MUSIC_TOKEN?.trim();
-  if (fromEnv) return fromEnv;
   try {
-    if (!fs.existsSync(TOKEN_FILE)) return null;
-    const raw = JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8')) as TokenFile;
-    const token = raw.accessToken?.trim();
-    return token || null;
+    if (fs.existsSync(TOKEN_FILE)) {
+      const raw = JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8')) as TokenFile;
+      const token = normalizeYandexToken(raw.accessToken ?? '');
+      if (token) return token;
+    }
   } catch {
-    return null;
+    /* fall through to env */
   }
+  const fromEnv = normalizeYandexToken(process.env.YANDEX_MUSIC_TOKEN ?? '');
+  return fromEnv || null;
 }
 
 export function isYandexConfigured(): boolean {
@@ -45,7 +56,7 @@ export function isYandexConfigured(): boolean {
 }
 
 export function saveYandexToken(token: string) {
-  const clean = token.trim();
+  const clean = normalizeYandexToken(token);
   if (!clean) throw new YandexMusicError('Пустой токен');
   fs.mkdirSync(path.dirname(TOKEN_FILE), { recursive: true });
   fs.writeFileSync(
@@ -63,10 +74,15 @@ export function clearYandexToken() {
   }
 }
 
-function headers(token?: string | null): Record<string, string> {
+function headers(token?: string | null, forMedia = false): Record<string, string> {
+  if (forMedia) {
+    return { 'User-Agent': USER_AGENT };
+  }
   const h: Record<string, string> = {
+    'User-Agent': USER_AGENT,
     'X-Yandex-Music-Client': CLIENT,
     'Accept-Language': 'ru',
+    Accept: 'application/json',
   };
   if (token) h.Authorization = `OAuth ${token}`;
   return h;
@@ -78,17 +94,40 @@ function signLyrics(trackId: string): { timeStamp: number; sign: string } {
   return { timeStamp, sign };
 }
 
+function yandexMessage(json: any, status: number): string {
+  const raw =
+    json?.error?.message ||
+    json?.errorDescription ||
+    json?.error_description ||
+    (typeof json?.error === 'string' ? json.error : null);
+  if (raw) return String(raw);
+  return `Яндекс ответил ${status}`;
+}
+
 async function yandexGet(url: string, token: string): Promise<any> {
-  const res = await fetch(url, { headers: headers(token) });
-  const json = (await res.json().catch(() => null)) as any;
-  if (res.status === 401 || res.status === 403) {
-    throw new YandexMusicError('Токен Яндекс Музыки не принят — подключи аккаунт заново', 401);
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: headers(token), signal: AbortSignal.timeout(20_000) });
+  } catch (err) {
+    throw new YandexMusicError(
+      `Не достучались до Яндекс Музыки: ${err instanceof Error ? err.message : 'сеть'}`,
+      502
+    );
   }
+  const json = (await res.json().catch(() => null)) as any;
   if (!res.ok) {
-    const msg = json?.error?.message || json?.error || `Яндекс ответил ${res.status}`;
-    throw new YandexMusicError(String(msg), res.status >= 400 && res.status < 600 ? res.status : 502);
+    // Никогда не отдаём 401 клиенту приложения — иначе iOS думает,
+    // что протух вход в bipMusic, и крутит refresh по кругу.
+    throw new YandexMusicError(yandexMessage(json, res.status), 400);
   }
   return json;
+}
+
+export async function verifyYandexToken(token: string): Promise<void> {
+  const json = await yandexGet(`${API}/account/status`, token);
+  if (!json?.result?.account && !json?.result?.plus && json?.result == null) {
+    throw new YandexMusicError('Яндекс не подтвердил этот токен', 400);
+  }
 }
 
 export type YandexSearchHit = {
@@ -166,7 +205,15 @@ export async function fetchTimedLyrics(yandexTrackId: string, durationMs?: numbe
     throw new YandexMusicError('У этого трека в Яндексе нет текста с таймкодами', 404);
   }
 
-  const file = await fetch(String(downloadUrl), { headers: headers(token) });
+  let file: Response;
+  try {
+    file = await fetch(String(downloadUrl), {
+      headers: headers(null, true),
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch {
+    throw new YandexMusicError('Не удалось скачать LRC с Яндекса', 502);
+  }
   if (!file.ok) throw new YandexMusicError('Не удалось скачать LRC с Яндекса', 502);
   const lyrics = stripEnhancedLrc(await file.text());
   if (!lyrics) throw new YandexMusicError('Яндекс вернул пустой текст', 404);
@@ -191,16 +238,20 @@ export async function requestDeviceCode(): Promise<{
   const body = new URLSearchParams({
     client_id: DEFAULT_CLIENT_ID,
     device_id: Math.random().toString(36).slice(2, 12),
-    device_name: 'bipMusic',
+    device_name: 'YandexMusicAPI',
   });
   const res = await fetch(`${OAUTH}/device/code`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': USER_AGENT,
+    },
     body,
+    signal: AbortSignal.timeout(15_000),
   });
   const json = (await res.json().catch(() => null)) as any;
   if (!res.ok || !json?.device_code || !json?.user_code) {
-    throw new YandexMusicError(json?.error_description || 'Не удалось получить код Яндекса', 502);
+    throw new YandexMusicError(json?.error_description || json?.error || 'Не удалось получить код Яндекса', 400);
   }
   return {
     deviceCode: String(json.device_code),
@@ -220,8 +271,12 @@ export async function pollDeviceToken(deviceCode: string): Promise<{ pending: tr
   });
   const res = await fetch(`${OAUTH}/token`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': USER_AGENT,
+    },
     body,
+    signal: AbortSignal.timeout(15_000),
   });
   const json = (await res.json().catch(() => null)) as any;
   if (json?.error === 'authorization_pending' || json?.error === 'slow_down') {
@@ -230,6 +285,14 @@ export async function pollDeviceToken(deviceCode: string): Promise<{ pending: tr
   if (!res.ok || !json?.access_token) {
     throw new YandexMusicError(json?.error_description || json?.error || 'Яндекс не выдал токен', 400);
   }
-  saveYandexToken(String(json.access_token));
+  const token = normalizeYandexToken(String(json.access_token));
+  await verifyYandexToken(token);
+  saveYandexToken(token);
   return { pending: false };
+}
+
+export async function saveAndVerifyYandexToken(token: string) {
+  const clean = normalizeYandexToken(token);
+  await verifyYandexToken(clean);
+  saveYandexToken(clean);
 }
