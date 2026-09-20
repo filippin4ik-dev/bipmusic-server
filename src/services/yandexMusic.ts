@@ -119,6 +119,50 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function httpBuffer(url: string, headers: Record<string, string>, redirects = 0): Promise<Buffer> {
+  const result = await new Promise<{ status: number; location?: string; body: Buffer }>((resolve, reject) => {
+    const u = new URL(url);
+    const req = https.request(
+      {
+        protocol: u.protocol,
+        hostname: u.hostname,
+        port: u.port || 443,
+        path: `${u.pathname}${u.search}`,
+        method: 'GET',
+        headers,
+        timeout: 20_000,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => {
+          resolve({
+            status: res.statusCode || 0,
+            location: res.headers.location,
+            body: Buffer.concat(chunks),
+          });
+        });
+      }
+    );
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new YandexMusicError('Яндекс не ответил вовремя', 502));
+    });
+    req.on('error', (err) => {
+      reject(new YandexMusicError(`Не достучались до Яндекс Музыки: ${err.message}`, 502));
+    });
+    req.end();
+  });
+  if (result.status >= 300 && result.status < 400 && result.location && redirects < 4) {
+    const next = new URL(result.location, url).toString();
+    return httpBuffer(next, headers, redirects + 1);
+  }
+  if (result.status >= 400) {
+    throw new YandexMusicError(`Не скачали файл с Яндекса (${result.status})`, 502);
+  }
+  return result.body;
+}
+
 function httpRequest(url: string, method: string, headers: Record<string, string>, body?: string): Promise<HttpResult> {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
@@ -448,6 +492,17 @@ export async function pollDeviceToken(deviceCode: string): Promise<{ pending: tr
     }
   }
   return { pending: false };
+}
+
+export async function yandexApiGet(pathAndQuery: string): Promise<any> {
+  const token = getYandexToken();
+  if (!token) throw new YandexMusicError('Яндекс Музыка не подключена', 400);
+  const path = pathAndQuery.startsWith('/') ? pathAndQuery : `/${pathAndQuery}`;
+  return yandexGet(path, token);
+}
+
+export async function yandexFetchBuffer(url: string): Promise<Buffer> {
+  return httpBuffer(url, { 'User-Agent': USER_AGENT });
 }
 
 export async function saveAndVerifyYandexToken(token: string) {

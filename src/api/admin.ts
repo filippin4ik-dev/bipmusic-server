@@ -39,6 +39,10 @@ import {
   saveAndVerifyYandexToken,
   searchTracks,
 } from '../services/yandexMusic.js';
+import {
+  getYandexImportJob,
+  startYandexPopularImport,
+} from '../services/yandexCatalogImport.js';
 
 const router = express.Router();
 
@@ -1014,6 +1018,22 @@ router.post('/yandex/lyrics', requireAdmin, async (req: AuthRequest, res: Respon
   } catch (err) {
     yandexFail(res, err);
   }
+});
+
+router.post('/yandex/import-popular', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const started = startYandexPopularImport();
+    await audit({ userId: req.userId, event: 'YANDEX_POPULAR_IMPORT' });
+    res.json(started);
+  } catch (err) {
+    yandexFail(res, err);
+  }
+});
+
+router.get('/yandex/import-popular', requireAdmin, (_req: AuthRequest, res: Response) => {
+  const current = getYandexImportJob();
+  if (!current) return res.json({ status: 'idle', message: 'Импорт ещё не запускали' });
+  res.json(current);
 });
 
 export default router;
