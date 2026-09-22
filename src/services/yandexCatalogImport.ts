@@ -10,7 +10,8 @@ import {
 
 const COVERS_DIR = path.resolve(process.env.COVERS_DIR || './data/covers');
 const MIN_MONTHLY_LISTENERS = 100_000;
-const MAX_ARTISTS = 80;
+const MAX_NEW_ARTISTS = 400;
+const MAX_IDS_TO_CHECK = 800;
 const MAX_PHOTOS = 6;
 const MAX_ALBUM_PAGES = 12;
 
@@ -32,14 +33,15 @@ export function getYandexImportJob(): YandexImportJob | null {
   return job;
 }
 
-export function startYandexPopularImport(): YandexImportJob {
+export function startYandexPopularImport(query?: string): YandexImportJob {
   if (!isYandexConfigured()) {
     throw new YandexMusicError('Сначала подключи Яндекс Музыку в тексте песен', 400);
   }
   if (running && job) return job;
+  const q = String(query ?? '').trim();
   job = {
     status: 'running',
-    message: 'Собираем чарт Яндекса…',
+    message: q ? `Ищем «${q}» и похожих…` : 'Собираем популярных не только из чарта…',
     artistsCreated: 0,
     artistsUpdated: 0,
     albumsCreated: 0,
@@ -48,7 +50,7 @@ export function startYandexPopularImport(): YandexImportJob {
     current: null,
   };
   running = true;
-  void runImport().catch((err) => {
+  void runImport(q).catch((err) => {
     if (job) {
       job.status = 'error';
       job.message = err instanceof Error ? err.message : 'Импорт не удался';
@@ -80,24 +82,116 @@ function collectArtistIds(node: any, into: Set<string>, depth = 0) {
   }
 }
 
-async function collectPopularArtistIds(): Promise<string[]> {
+async function searchArtistIds(query: string, pages = 2): Promise<string[]> {
+  const ids: string[] = [];
+  for (let page = 0; page < pages; page++) {
+    try {
+      const json = await yandexApiGet(
+        `/search?text=${encodeURIComponent(query)}&type=artist&page=${page}&nocorrect=false`
+      );
+      collectArtistIds(json?.result?.artists ?? json, new Set());
+      const rows = json?.result?.artists?.results;
+      if (Array.isArray(rows)) {
+        for (const row of rows) {
+          if (row?.id != null) ids.push(String(row.id));
+        }
+      } else {
+        const bag = new Set<string>();
+        collectArtistIds(json, bag);
+        ids.push(...bag);
+      }
+      await sleep(120);
+    } catch {
+      break;
+    }
+  }
+  return ids;
+}
+
+async function similarArtistIds(yandexId: string): Promise<string[]> {
+  try {
+    const json = await yandexApiGet(`/artists/${encodeURIComponent(yandexId)}/similar`);
+    const rows = json?.result?.similarArtists ?? json?.result?.similar_artists ?? json?.result ?? [];
+    const bag = new Set<string>();
+    if (Array.isArray(rows)) {
+      for (const row of rows) {
+        if (row?.id != null) bag.add(String(row.id));
+      }
+    } else {
+      collectArtistIds(json, bag);
+    }
+    return [...bag];
+  } catch {
+    return [];
+  }
+}
+
+async function collectPopularArtistIds(seedQuery?: string): Promise<string[]> {
   const ids = new Set<string>();
+  const add = (value: string) => {
+    if (value) ids.add(value);
+  };
+
+  if (seedQuery) {
+    for (const found of await searchArtistIds(seedQuery, 3)) add(found);
+  }
+
   const paths = [
     '/landing3/chart',
     '/landing3/chart/world',
-    '/landing3?blocks=new-releases,chart',
+    '/landing3/chart/russia',
+    '/landing3?blocks=new-releases,chart,new-playlists,promotions',
     '/chart',
   ];
   for (const pathAndQuery of paths) {
     try {
       const json = await yandexApiGet(pathAndQuery);
       collectArtistIds(json, ids);
-      await sleep(200);
+      await sleep(120);
     } catch {
       /* блок может отсутствовать */
     }
   }
-  return [...ids];
+
+  try {
+    const genres = await yandexApiGet('/genres');
+    const list = Array.isArray(genres?.result) ? genres.result : [];
+    for (const genre of list.slice(0, 35)) {
+      const slug = String(genre?.id ?? genre?.url ?? '').replace(/^\//, '');
+      if (!slug) continue;
+      try {
+        const page = await yandexApiGet(`/landing3/genre/${encodeURIComponent(slug)}`);
+        collectArtistIds(page, ids);
+      } catch {
+        /* жанр без витрины */
+      }
+      await sleep(80);
+      if (ids.size >= MAX_IDS_TO_CHECK) break;
+    }
+  } catch {
+    /* жанры недоступны */
+  }
+
+  const queries = [
+    'хит', 'популярное', 'русский рэп', 'поп', 'рок', 'phonk', 'rnb',
+    'моргенштерн', 'morgenstern', 'инстасамка', 'мияхеева', 'macan',
+    'скриптонит', 'kreed', 'jony', 'anna asti', 'artik asti',
+    ...[...'абвгдежзиклмнопрстуфхцчшэюя'],
+    ...[...'abcdefghijklmnopqrstuvwxyz'],
+  ];
+  for (const query of queries) {
+    if (ids.size >= MAX_IDS_TO_CHECK) break;
+    for (const found of await searchArtistIds(query, 1)) add(found);
+  }
+
+  const seeds = [...ids].slice(0, 80);
+  for (const seed of seeds) {
+    if (ids.size >= MAX_IDS_TO_CHECK) break;
+    for (const found of await similarArtistIds(seed)) add(found);
+    await sleep(100);
+  }
+
+  return [...ids].slice(0, MAX_IDS_TO_CHECK);
 }
 
 function coverHttpUrl(uri: unknown, size = '1000x1000'): string | null {
@@ -210,26 +304,33 @@ function uniqueUrls(urls: string[]): string[] {
   return out;
 }
 
-async function runImport() {
+async function runImport(seedQuery?: string) {
   if (!job) return;
-  const ids = await collectPopularArtistIds();
+  const ids = await collectPopularArtistIds(seedQuery);
   if (!ids.length) {
     job.status = 'error';
-    job.message = 'Яндекс не отдал чарт артистов. Проверь подключение.';
+    job.message = seedQuery
+      ? `Яндекс не нашёл «${seedQuery}». Если артиста нет в каталоге Яндекса, его оттуда не забрать.`
+      : 'Яндекс не отдал популярных артистов. Проверь подключение.';
     return;
   }
 
-  job.message = `Проверяем ${ids.length} артистов из чарта…`;
+  job.message = `Проверяем ${ids.length} артистов (чарт, жанры, поиск, похожие)…`;
   const existing = await prisma.artist.findMany({ select: { id: true, name: true, imageUrl: true } });
   const byName = new Map(existing.map((row) => [row.name.trim().toLowerCase(), row]));
 
+  const queue = [...ids];
+  const seenIds = new Set<string>();
   let processed = 0;
-  for (const yandexId of ids) {
+  while (queue.length) {
     if (!job || job.status !== 'running') return;
-    if (job.artistsCreated + job.artistsUpdated >= MAX_ARTISTS) break;
+    if (job.artistsCreated >= MAX_NEW_ARTISTS) break;
+    const yandexId = queue.shift()!;
+    if (seenIds.has(yandexId)) continue;
+    seenIds.add(yandexId);
     processed += 1;
     job.current = yandexId;
-    job.message = `Артист ${processed} из ${ids.length}…`;
+    job.message = `Артист ${processed} · в очереди ещё ${queue.length}…`;
 
     try {
       await sleep(220);
@@ -248,6 +349,12 @@ async function runImport() {
 
       job.current = name;
       job.message = `${name} · ${listeners.toLocaleString('ru-RU')} слушателей`;
+
+      if (seenIds.size + queue.length < MAX_IDS_TO_CHECK) {
+        for (const related of await similarArtistIds(yandexId)) {
+          if (!seenIds.has(related)) queue.push(related);
+        }
+      }
 
       let about: any = null;
       try {

@@ -1022,7 +1022,7 @@ router.post('/yandex/lyrics', requireAdmin, async (req: AuthRequest, res: Respon
 
 router.post('/yandex/import-popular', requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const started = startYandexPopularImport();
+    const started = startYandexPopularImport(String(req.body?.query ?? ''));
     await audit({ userId: req.userId, event: 'YANDEX_POPULAR_IMPORT' });
     res.json(started);
   } catch (err) {
