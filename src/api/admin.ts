@@ -43,6 +43,12 @@ import {
   getYandexImportJob,
   startYandexPopularImport,
 } from '../services/yandexCatalogImport.js';
+import {
+  cancelArchiveImport,
+  getArchiveImportJob,
+  startArchiveImport,
+} from '../services/archiveImport.js';
+import { cleanTrackTitle } from '../utils/trackTitle.js';
 
 const router = express.Router();
 
@@ -122,19 +128,6 @@ function normalizeBio(value: unknown): string | null {
 
 function safeUnlink(p: string) {
   try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch {}
-}
-
-/** «Track (Remix)» / «Song [Official]» → чистое название при загрузке. */
-function cleanTrackTitle(raw: unknown): string {
-  let out = String(raw ?? '').trim();
-  const original = out;
-  for (let i = 0; i < 8; i++) {
-    const next = out.replace(/\s*[\(\[\{][^\)\]\}]*[\)\]\}]/g, '');
-    if (next === out) break;
-    out = next;
-  }
-  out = out.replace(/\s+/g, ' ').trim();
-  return out || original;
 }
 
 /**
@@ -730,6 +723,74 @@ router.post(
     res.status(201).json(serializeTrack(track));
   }
 );
+
+// =====================================================================
+// АРХИВ С МУЗЫКОЙ: один zip → сервер сам распаковывает и раскладывает
+// =====================================================================
+
+const archiveUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, TMP_DIR),
+    filename: (_req, _file, cb) => cb(null, `archive-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.zip`),
+  }),
+  limits: { fileSize: 8 * 1024 * 1024 * 1024 }, // 8 ГБ
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, ext === '.zip');
+  },
+});
+
+/**
+ * POST /api/admin/import/archive
+ * multipart: archive (zip), defaultArtistId?, defaultAlbumId?, createMissing? ("0"/"1")
+ * Отвечает сразу после приёма файла; разбор идёт в фоне — прогресс по GET.
+ */
+router.post(
+  '/import/archive',
+  requireAdmin,
+  archiveUpload.single('archive'),
+  async (req: AuthRequest, res: Response) => {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Нужен .zip с музыкой' });
+    }
+    let size = 0;
+    try { size = fs.statSync(req.file.path).size; } catch {}
+    if (size === 0) {
+      safeUnlink(req.file.path);
+      return res.status(400).json({ error: 'Архив пустой — повтори загрузку' });
+    }
+    const defaultArtistId = String(req.body?.defaultArtistId ?? '').trim() || null;
+    const defaultAlbumId = String(req.body?.defaultAlbumId ?? '').trim() || null;
+    const createMissing = String(req.body?.createMissing ?? '1') !== '0';
+    try {
+      const started = startArchiveImport({
+        archivePath: req.file.path,
+        archiveName: req.file.originalname,
+        defaultArtistId,
+        defaultAlbumId,
+        createMissing,
+        userId: req.userId,
+      });
+      console.log(`[import] archive "${req.file.originalname}" bytes=${size} user=${req.userId}`);
+      res.status(202).json(started);
+    } catch (err) {
+      safeUnlink(req.file.path);
+      res.status(409).json({ error: err instanceof Error ? err.message : 'Импорт уже идёт' });
+    }
+  }
+);
+
+router.get('/import/archive', requireAdmin, (_req: AuthRequest, res: Response) => {
+  const current = getArchiveImportJob();
+  if (!current) return res.json({ status: 'idle', message: 'Архив ещё не загружали' });
+  res.json(current);
+});
+
+router.delete('/import/archive', requireAdmin, (_req: AuthRequest, res: Response) => {
+  const current = cancelArchiveImport();
+  if (!current) return res.json({ status: 'idle', message: 'Нечего останавливать' });
+  res.json(current);
+});
 
 router.post('/tracks/:id/cover', requireAdmin, coverUpload.single('cover'), async (req: AuthRequest, res: Response) => {
   if (!req.file) return res.status(400).json({ error: 'No cover file provided' });

@@ -7,9 +7,9 @@
 bipmusic.ru {
     encode gzip zstd
 
-    # Large file uploads up to ~250 MB (admin upload)
+    # Крупные загрузки админа: отдельные треки до 200 МБ, zip-архивы с музыкой до 8 ГБ.
     request_body {
-        max_size 400MB
+        max_size 8GB
     }
 
     reverse_proxy api:3000 {

@@ -169,12 +169,16 @@ async function boot() {
     cleanupOldAttempts().catch(() => {});
   }, 60 * 60 * 1000);
 
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`\n🎵 bpMZ Backend running on http://localhost:${PORT}`);
     console.log(`📂 Tracks (encrypted): ${TRACKS_DIR}`);
     console.log(`🖼️  Covers: ${COVERS_DIR}`);
     console.log(`💾 Database: ${process.env.DATABASE_URL}\n`);
   });
+  // Node по умолчанию режет запрос через 5 минут — zip с музыкой на несколько
+  // гигабайт по мобильной сети так не долить. Даём 3 часа на тело запроса.
+  server.requestTimeout = 3 * 60 * 60 * 1000;
+  server.headersTimeout = 2 * 60 * 1000;
 }
 
 async function shutdown() {
