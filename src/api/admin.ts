@@ -46,7 +46,9 @@ import {
 import {
   cancelArchiveImport,
   getArchiveImportJob,
-  startArchiveImport,
+  startArchiveRun,
+  startArchiveScan,
+  type GroupChoice,
 } from '../services/archiveImport.js';
 import { cleanTrackTitle } from '../utils/trackTitle.js';
 
@@ -743,7 +745,8 @@ const archiveUpload = multer({
 /**
  * POST /api/admin/import/archive
  * multipart: archive (zip), defaultArtistId?, defaultAlbumId?, createMissing? ("0"/"1")
- * Отвечает сразу после приёма файла; разбор идёт в фоне — прогресс по GET.
+ * Отвечает сразу после приёма файла. Дальше сервер читает теги и строит план
+ * раскладки (status: scanning → ready); план и прогресс — по GET.
  */
 router.post(
   '/import/archive',
@@ -763,7 +766,7 @@ router.post(
     const defaultAlbumId = String(req.body?.defaultAlbumId ?? '').trim() || null;
     const createMissing = String(req.body?.createMissing ?? '1') !== '0';
     try {
-      const started = startArchiveImport({
+      const started = startArchiveScan({
         archivePath: req.file.path,
         archiveName: req.file.originalname,
         defaultArtistId,
@@ -784,6 +787,33 @@ router.get('/import/archive', requireAdmin, (_req: AuthRequest, res: Response) =
   const current = getArchiveImportJob();
   if (!current) return res.json({ status: 'idle', message: 'Архив ещё не загружали' });
   res.json(current);
+});
+
+const GroupChoiceSchema = z.object({
+  id: z.string().min(1),
+  skip: z.boolean().optional(),
+  artistId: z.string().nullable().optional(),
+  newArtistName: z.string().max(200).nullable().optional(),
+  albumId: z.string().nullable().optional(),
+  newAlbumTitle: z.string().max(200).nullable().optional(),
+  single: z.boolean().optional(),
+});
+
+/**
+ * POST /api/admin/import/archive/run
+ * body: { groups: GroupChoice[] } — правки админа поверх плана. Группы без
+ * правок идут по предложению сервера.
+ */
+router.post('/import/archive/run', requireAdmin, async (req: AuthRequest, res: Response) => {
+  const parsed = z.object({ groups: z.array(GroupChoiceSchema).default([]) }).safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ error: 'Неверный формат решений по группам' });
+  try {
+    const started = startArchiveRun(parsed.data.groups as GroupChoice[]);
+    await audit({ userId: req.userId, event: 'TRACKS_ARCHIVE_RUN', payload: { choices: parsed.data.groups.length } });
+    res.status(202).json(started);
+  } catch (err) {
+    res.status(409).json({ error: err instanceof Error ? err.message : 'Не удалось запустить импорт' });
+  }
 });
 
 router.delete('/import/archive', requireAdmin, (_req: AuthRequest, res: Response) => {
